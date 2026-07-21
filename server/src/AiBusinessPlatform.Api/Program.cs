@@ -1,5 +1,6 @@
 using AiBusinessPlatform.Api.Endpoints;
 using AiBusinessPlatform.Api.Orchestrator;
+using AiBusinessPlatform.Api.Payments;
 using AiBusinessPlatform.Api.Tenancy;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
@@ -30,6 +31,7 @@ builder.Services.AddScoped<ICurrentTenantProvider, HttpBusinessIdTenantProvider>
 // entry points resolve to identical implementations.
 builder.Services.AddScoped<IHealthTool, HealthTool>();
 builder.Services.AddScoped<ICatalogTools, CatalogTools>();
+builder.Services.AddScoped<IOrderTools, OrderTools>();
 builder.Services.AddScoped<IPaymentTools, PaymentTools>();
 builder.Services.AddScoped<IDeliveryTools, DeliveryTools>();
 builder.Services.AddScoped<IApprovalTools, ApprovalTools>();
@@ -57,6 +59,7 @@ builder.Services.AddSingleton<IChatClient>(sp =>
     return new ChatClientBuilder(innerChatClient).UseFunctionInvocation().Build();
 });
 builder.Services.AddHostedService<WhatsAppOrchestratorConsumer>();
+builder.Services.AddHostedService<PaymentWebhookConsumer>();
 
 // Dev-only permissive CORS so the Expo web preview (a different origin/port) can call this Api.
 // Native (iOS/Android) builds aren't subject to CORS, so this only matters for the web target.

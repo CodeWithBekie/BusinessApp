@@ -38,15 +38,23 @@ public static class WebhooksEndpoints
             return Results.Ok();
         });
 
+        // Body shape is SimulatedPaymentWebhook — a stand-in for a real Paynow webhook payload
+        // (Section 13.2) until that integration is built. Hit with provider = "manual" for local
+        // testing; PaymentWebhookConsumer consumes payments.manual.inbound.
         group.MapPost("/payments/{provider}", async (string provider, HttpRequest request, IQueuePublisher queuePublisher, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
         {
             var logger = loggerFactory.CreateLogger("PaymentWebhook");
-            using var reader = new StreamReader(request.Body);
-            var payload = await reader.ReadToEndAsync(cancellationToken);
-            logger.LogInformation("Received {Provider} payment webhook payload ({Length} bytes)", provider, payload.Length);
+
+            var envelope = await request.ReadFromJsonAsync<SimulatedPaymentWebhook>(cancellationToken);
+            if (envelope is null || envelope.OrderId == Guid.Empty || string.IsNullOrWhiteSpace(envelope.Status))
+            {
+                return Results.BadRequest("Expected { orderId, providerReference, status } — stand-in for a real Paynow payload (Section 13.2).");
+            }
+
+            logger.LogInformation("Received {Provider} payment webhook for order {OrderId} (status: {Status})", provider, envelope.OrderId, envelope.Status);
 
             // TODO: verify provider signature/credentials (Section 13.2, 15) before trusting this payload.
-            await queuePublisher.PublishAsync($"payments.{provider}.inbound", payload, cancellationToken);
+            await queuePublisher.PublishAsync($"payments.{provider}.inbound", JsonSerializer.Serialize(envelope), cancellationToken);
             return Results.Ok();
         });
     }

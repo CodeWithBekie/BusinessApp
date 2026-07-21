@@ -114,6 +114,7 @@ public class WhatsAppOrchestratorConsumer(
             await using var scope = scopeFactory.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AiBusinessPlatformDbContext>();
             var catalogTools = scope.ServiceProvider.GetRequiredService<ICatalogTools>();
+            var orderTools = scope.ServiceProvider.GetRequiredService<IOrderTools>();
             var tenantProvider = scope.ServiceProvider.GetRequiredService<ICurrentTenantProvider>();
 
             var customer = await GetOrCreateCustomerAsync(db, tenantProvider, envelope.CustomerNumber, stoppingToken);
@@ -138,12 +139,29 @@ public class WhatsAppOrchestratorConsumer(
             var history = BuildChatHistory(priorMessages);
 
             // Rebuilt per message against this scope's tools/tenant — the model only ever
-            // supplies itemQuery, businessId always comes from the ambient tenant context.
+            // supplies itemQuery/itemId/quantity, businessId and customerId always come from the
+            // ambient tenant/customer context resolved above, never from the model.
             var checkAvailabilityTool = AIFunctionFactory.Create(
                 (string itemQuery) => catalogTools.CheckAvailabilityAsync(tenantProvider.CurrentBusinessId, itemQuery),
                 "check_catalog_availability",
                 "Finds catalog items matching a free-text query and returns price/stock availability.");
-            var chatOptions = new ChatOptions { Tools = [checkAvailabilityTool] };
+
+            var reserveStockTool = AIFunctionFactory.Create(
+                (Guid itemId, int quantity) => catalogTools.ReserveStockAsync(tenantProvider.CurrentBusinessId, customer.Id, itemId, quantity),
+                "reserve_stock",
+                "Reserves a quantity of a catalog item for the customer's current order, after they've explicitly confirmed they want to buy it. Decrements available stock immediately.");
+
+            var releaseStockTool = AIFunctionFactory.Create(
+                (string itemQuery) => catalogTools.ReleaseStockAsync(tenantProvider.CurrentBusinessId, customer.Id, itemQuery),
+                "release_stock_reservation",
+                "Cancels a previously reserved item on the customer's current order by name (e.g. \"cement\"), restoring its stock — use this when the customer changed their mind before paying.");
+
+            var createInvoiceTool = AIFunctionFactory.Create(
+                () => orderTools.CreateInvoiceAsync(tenantProvider.CurrentBusinessId, customer.Id),
+                "create_invoice",
+                "Creates the invoice and payment reference for everything the customer has reserved so far. Only call this after the customer has confirmed all items they want and at least one item has been reserved.");
+
+            var chatOptions = new ChatOptions { Tools = [checkAvailabilityTool, reserveStockTool, releaseStockTool, createInvoiceTool] };
 
             var response = await chatClient.GetResponseAsync(history, chatOptions, stoppingToken);
 
@@ -228,9 +246,25 @@ public class WhatsAppOrchestratorConsumer(
         var history = new List<ChatMessage>
         {
             new(ChatRole.System,
-                "You are a WhatsApp order-taking assistant for a hardware store. When a customer asks " +
-                "about an item's availability or price, use the check_catalog_availability tool to look " +
-                "it up before answering — never guess. Be concise, like a real WhatsApp reply.")
+                "You are a WhatsApp order-taking assistant for a hardware store, handling the full " +
+                "order-to-cash flow. Follow these rules strictly:\n" +
+                "1. When a customer asks about an item's availability or price, use check_catalog_availability " +
+                "before answering — never guess.\n" +
+                "2. Only call reserve_stock after the customer has EXPLICITLY confirmed they want to buy a " +
+                "specific item and quantity (e.g. \"yes, 2 bags of cement please\") — never reserve stock " +
+                "just because an item was mentioned, asked about, or compared.\n" +
+                "3. If reserve_stock reports insufficient stock, tell the customer honestly and offer " +
+                "alternatives or a smaller quantity — never claim something is reserved if it wasn't.\n" +
+                "4. If the customer wants to remove or cancel an item they already confirmed (before " +
+                "paying), call release_stock_reservation with that item's name.\n" +
+                "5. Once the customer has confirmed everything they want to order and at least one item is " +
+                "reserved, call create_invoice exactly once to generate the total and payment reference. " +
+                "Read the total and payment reference back to the customer clearly, and tell them you'll " +
+                "confirm once payment is received — do not claim payment is already received.\n" +
+                "6. Never mark anything as paid yourself — payment confirmation happens outside this " +
+                "conversation. If the customer claims they already paid, tell them you'll check and get " +
+                "back to them; do not change any order status based on their claim alone.\n" +
+                "7. Be concise, like a real WhatsApp reply.")
         };
 
         history.AddRange(priorMessages.Select(m => new ChatMessage(

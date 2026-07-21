@@ -12,5 +12,7 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.HasIndex(x => x.BusinessId);
         // Idempotency on webhook redelivery (Section 9.3) — a provider reference is only ever recorded once.
         builder.HasIndex(x => x.ProviderReference).IsUnique();
+        // Order-to-cash lookups: "find this order's pending payment".
+        builder.HasIndex(x => new { x.OrderId, x.Status });
     }
 }
