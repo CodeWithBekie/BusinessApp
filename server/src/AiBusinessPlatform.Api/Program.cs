@@ -1,4 +1,5 @@
 using AiBusinessPlatform.Api.Endpoints;
+using AiBusinessPlatform.Api.Orchestrator;
 using AiBusinessPlatform.Api.Tenancy;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
@@ -6,6 +7,9 @@ using AiBusinessPlatform.Infrastructure.Data;
 using AiBusinessPlatform.Infrastructure.Messaging;
 using AiBusinessPlatform.Infrastructure.Tools;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
+using OpenAI;
+using System.ClientModel;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -33,6 +37,26 @@ builder.Services.AddScoped<IRagTools, RagTools>();
 
 builder.Services.AddHealthChecks()
     .AddNpgSql(builder.Configuration.GetConnectionString("Default") ?? string.Empty, name: "postgres");
+
+// Section 10.2 — the same LM Studio + tool-calling recipe already proven in the
+// OrchestratorHarness console app, now wired into a real hosted service.
+builder.Services.Configure<LmStudioOptions>(builder.Configuration.GetSection(LmStudioOptions.SectionName));
+builder.Services.AddSingleton<IChatClient>(sp =>
+{
+    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LmStudioOptions>>().Value;
+    if (string.IsNullOrWhiteSpace(options.Model))
+    {
+        throw new InvalidOperationException("LmStudio:Model is not configured (appsettings.json).");
+    }
+
+    var openAIClient = new OpenAIClient(
+        new ApiKeyCredential(options.ApiKey),
+        new OpenAIClientOptions { Endpoint = new Uri(options.BaseUrl) });
+
+    IChatClient innerChatClient = openAIClient.GetChatClient(options.Model).AsIChatClient();
+    return new ChatClientBuilder(innerChatClient).UseFunctionInvocation().Build();
+});
+builder.Services.AddHostedService<WhatsAppOrchestratorConsumer>();
 
 // Dev-only permissive CORS so the Expo web preview (a different origin/port) can call this Api.
 // Native (iOS/Android) builds aren't subject to CORS, so this only matters for the web target.

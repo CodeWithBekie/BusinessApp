@@ -1,3 +1,5 @@
+using System.Text.Json;
+using AiBusinessPlatform.Api.Contracts;
 using AiBusinessPlatform.Application.Abstractions;
 
 namespace AiBusinessPlatform.Api.Endpoints;
@@ -16,15 +18,23 @@ public static class WebhooksEndpoints
             return challenge is not null ? Results.Text(challenge) : Results.BadRequest();
         });
 
+        // Body shape is SimulatedWhatsAppMessage — a stand-in for a real Meta webhook payload
+        // (Section 13.1) until that integration is built; the queue contract below is designed
+        // so a future real-payload parser can keep publishing this same envelope.
         group.MapPost("/whatsapp", async (HttpRequest request, IQueuePublisher queuePublisher, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
         {
             var logger = loggerFactory.CreateLogger("WhatsAppWebhook");
-            using var reader = new StreamReader(request.Body);
-            var payload = await reader.ReadToEndAsync(cancellationToken);
-            logger.LogInformation("Received WhatsApp webhook payload ({Length} bytes)", payload.Length);
+
+            var envelope = await request.ReadFromJsonAsync<SimulatedWhatsAppMessage>(cancellationToken);
+            if (envelope is null || string.IsNullOrWhiteSpace(envelope.CustomerNumber) || string.IsNullOrWhiteSpace(envelope.Text))
+            {
+                return Results.BadRequest("Expected { customerNumber, text } — stand-in for a real Meta payload (Section 13.1).");
+            }
+
+            logger.LogInformation("Received simulated WhatsApp message from {CustomerNumber}", envelope.CustomerNumber);
 
             // TODO: verify Meta's webhook signature (Section 9.3, 15) before trusting this payload.
-            await queuePublisher.PublishAsync("whatsapp.inbound", payload, cancellationToken);
+            await queuePublisher.PublishAsync("whatsapp.inbound", JsonSerializer.Serialize(envelope), cancellationToken);
             return Results.Ok();
         });
 
