@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AiBusinessPlatform.Application\AiBusinessPlatform.Application.csproj" />
+    <ProjectReference Include="..\..\src\AiBusinessPlatform.Infrastructure\AiBusinessPlatform.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.4" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.8.1" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.8.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.18" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>970f8d3a-fa43-41f5-afa5-5158b18da2e1</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
