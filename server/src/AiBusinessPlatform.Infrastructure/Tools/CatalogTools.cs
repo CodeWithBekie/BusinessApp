@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Domain;
@@ -160,6 +161,7 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
         order.UpdatedAt = DateTimeOffset.UtcNow;
 
         var releasedItemId = orderItem.Id;
+        var previousOrderStatus = order.Status;
         dbContext.OrderItems.Remove(orderItem);
 
         // If that was the order's only item, cancel the order rather than leaving an empty Quoted shell.
@@ -167,6 +169,20 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
         if (remainingItems == 0)
         {
             order.Status = OrderStatus.Cancelled;
+
+            dbContext.AuditLogs.Add(new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                BusinessId = tenantProvider.CurrentBusinessId,
+                ActorType = AuditActorType.System,
+                ActorId = "ai-orchestrator",
+                Action = "order.cancellation.released",
+                EntityType = nameof(Order),
+                EntityId = order.Id.ToString(),
+                BeforeStateJson = JsonSerializer.Serialize(new { Status = previousOrderStatus.ToString() }),
+                AfterStateJson = JsonSerializer.Serialize(new { Status = order.Status.ToString() }),
+                CreatedAt = DateTimeOffset.UtcNow
+            });
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
