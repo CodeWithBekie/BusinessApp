@@ -18,6 +18,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi();
 builder.Services.AddHttpContextAccessor();
 
+// Enums (order/approval/catalog-item/WhatsApp-connection status, etc.) serialize as readable
+// names instead of raw ints — the only consumer of this Api's JSON today is the mobile dashboard.
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
+
 builder.Services.AddDbContext<AiBusinessPlatformDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default"), o => o.UseVector()));
 

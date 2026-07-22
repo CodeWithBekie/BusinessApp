@@ -6,7 +6,7 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 
-type TabIconName = 'cart' | 'list.bullet' | 'chart.bar' | 'checkmark.seal' | 'bubble.left.and.bubble.right';
+type TabIconName = 'cart' | 'list.bullet' | 'chart.bar' | 'checkmark.seal' | 'bubble.left.and.bubble.right' | 'gearshape';
 
 function TabIcon({ name, color }: { name: TabIconName; color: ColorValue }) {
   return <SymbolView name={{ ios: name, android: 'code', web: 'code' }} tintColor={color} size={26} />;
@@ -27,6 +27,7 @@ export default function TabLayout() {
       <Tabs.Screen name="sales" options={{ title: 'Sales', tabBarIcon: ({ color }) => <TabIcon name="chart.bar" color={color} /> }} />
       <Tabs.Screen name="approvals" options={{ title: 'Approvals', tabBarIcon: ({ color }) => <TabIcon name="checkmark.seal" color={color} /> }} />
       <Tabs.Screen name="assistant" options={{ title: 'Assistant', tabBarIcon: ({ color }) => <TabIcon name="bubble.left.and.bubble.right" color={color} /> }} />
+      <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: ({ color }) => <TabIcon name="gearshape" color={color} /> }} />
     </Tabs>
   );
 }

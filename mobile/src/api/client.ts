@@ -13,7 +13,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`API request to ${path} failed: ${response.status} ${response.statusText}`);
+    const body = await response.text().catch(() => '');
+    throw new Error(`API request to ${path} failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
   }
 
   return response.json() as Promise<T>;
@@ -24,11 +29,30 @@ export const apiClient = {
   getOrders: () => request<Order[]>('/api/orders'),
   getApprovals: () => request<PendingApproval[]>('/api/approvals'),
   getSalesSummary: () => request<SalesSummary>('/api/sales/summary'),
+
+  decideApproval: (id: string, decision: 'approve' | 'reject') =>
+    request<ApprovalDecisionResult>(`/api/approvals/${id}/decision`, {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    }),
+
+  ingestDocument: (title: string, content: string, sourceType?: string) =>
+    request<IngestDocumentResult>('/api/documents', {
+      method: 'POST',
+      body: JSON.stringify({ title, content, sourceType }),
+    }),
+
+  connectWhatsApp: (wabaId: string, phoneNumberId: string, systemUserToken: string) =>
+    request<WhatsAppConnection>('/api/whatsapp/connect', {
+      method: 'POST',
+      body: JSON.stringify({ wabaId, phoneNumberId, systemUserToken }),
+    }),
 };
 
 export interface CatalogItem {
   id: string;
   name: string;
+  itemType: 'Stock' | 'TimeBased' | 'Quote';
   price: number;
   currency: string;
   stockQuantity: number | null;
@@ -37,7 +61,7 @@ export interface CatalogItem {
 
 export interface Order {
   id: string;
-  status: string;
+  status: 'Quoted' | 'Invoiced' | 'Paid' | 'Fulfilled' | 'Cancelled';
   totalAmount: number;
   currency: string;
 }
@@ -45,10 +69,36 @@ export interface Order {
 export interface PendingApproval {
   id: string;
   actionType: string;
-  status: string;
+  detailsJson: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  requestedAt: string;
+  decidedAt: string | null;
+  decidedBy: string | null;
+}
+
+export interface ApprovalDecisionResult {
+  pendingApprovalId: string;
+  actionType: string;
+  detailsJson: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  wasAlreadyDecided: boolean;
 }
 
 export interface SalesSummary {
   totalOrders: number;
   totalAmount: number;
+}
+
+export interface IngestDocumentResult {
+  documentId: string;
+  chunkCount: number;
+}
+
+export interface WhatsAppConnection {
+  id: string;
+  businessId: string;
+  wabaId: string;
+  phoneNumberId: string;
+  status: 'Pending' | 'Active' | 'Disabled';
+  createdAt: string;
 }
