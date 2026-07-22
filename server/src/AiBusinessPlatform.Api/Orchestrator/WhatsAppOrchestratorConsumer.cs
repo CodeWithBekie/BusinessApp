@@ -108,7 +108,7 @@ public class WhatsAppOrchestratorConsumer(
         try
         {
             var json = Encoding.UTF8.GetString(ea.Body.Span); // copy now — Body is only valid during this callback
-            var envelope = JsonSerializer.Deserialize<SimulatedWhatsAppMessage>(json)
+            var envelope = JsonSerializer.Deserialize<WhatsAppInboundQueueMessage>(json)
                 ?? throw new InvalidOperationException("Envelope deserialized to null.");
 
             await using var scope = scopeFactory.CreateAsyncScope();
@@ -117,6 +117,20 @@ public class WhatsAppOrchestratorConsumer(
             var orderTools = scope.ServiceProvider.GetRequiredService<IOrderTools>();
             var ragTools = scope.ServiceProvider.GetRequiredService<IRagTools>();
             var tenantProvider = scope.ServiceProvider.GetRequiredService<ICurrentTenantProvider>();
+            var tenantSetter = scope.ServiceProvider.GetRequiredService<ICurrentTenantSetter>();
+
+            // Must happen before any other scoped service resolves/uses tenantProvider — there's
+            // no HttpContext here, so BusinessId (already resolved once at webhook ingress) has
+            // to be pushed in explicitly rather than inferred.
+            tenantSetter.SetBusinessId(envelope.BusinessId);
+
+            if (envelope.WhatsAppMessageId is not null &&
+                await db.Messages.AnyAsync(m => m.WhatsAppMessageId == envelope.WhatsAppMessageId, stoppingToken))
+            {
+                logger.LogInformation("Skipping already-processed WhatsApp message {WhatsAppMessageId} (redelivery).", envelope.WhatsAppMessageId);
+                await _channel!.BasicAckAsync(ea.DeliveryTag, multiple: false, stoppingToken);
+                return;
+            }
 
             var customer = await GetOrCreateCustomerAsync(db, tenantProvider, envelope.CustomerNumber, stoppingToken);
             var conversation = await GetOrCreateOpenConversationAsync(db, tenantProvider, customer, stoppingToken);
@@ -128,6 +142,7 @@ public class WhatsAppOrchestratorConsumer(
                 ConversationId = conversation.Id,
                 Direction = MessageDirection.Inbound,
                 Content = envelope.Text,
+                WhatsAppMessageId = envelope.WhatsAppMessageId,
                 CreatedAt = DateTimeOffset.UtcNow
             });
             await db.SaveChangesAsync(stoppingToken);
@@ -189,6 +204,9 @@ public class WhatsAppOrchestratorConsumer(
             });
             await db.SaveChangesAsync(stoppingToken);
 
+            var whatsAppSender = scope.ServiceProvider.GetRequiredService<IWhatsAppSender>();
+            await TrySendRealWhatsAppMessageAsync(whatsAppSender, db, tenantProvider, envelope.CustomerNumber, response.Text ?? string.Empty, stoppingToken);
+
             await _channel!.BasicAckAsync(ea.DeliveryTag, multiple: false, stoppingToken);
         }
         catch (Exception ex)
@@ -204,6 +222,37 @@ public class WhatsAppOrchestratorConsumer(
             {
                 logger.LogError(nackEx, "Failed to nack delivery {DeliveryTag}", ea.DeliveryTag);
             }
+        }
+    }
+
+    // A failed send must never nack the queue message or crash the consumer: the AI turn's side
+    // effects (reservations, invoices) already committed above, and there's no dead-letter queue
+    // to safely retry into. This is expected to fail until a real Meta connection is configured.
+    private async Task TrySendRealWhatsAppMessageAsync(
+        IWhatsAppSender whatsAppSender, AiBusinessPlatformDbContext db, ICurrentTenantProvider tenantProvider,
+        string customerWaId, string text, CancellationToken ct)
+    {
+        try
+        {
+            var connection = await db.WhatsAppConnections
+                .FirstOrDefaultAsync(c => c.BusinessId == tenantProvider.CurrentBusinessId && c.Status == WhatsAppConnectionStatus.Active, ct);
+
+            if (connection is null)
+            {
+                logger.LogInformation("No active WhatsAppConnection for business {BusinessId} — skipping real send.", tenantProvider.CurrentBusinessId);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+
+            await whatsAppSender.SendTextMessageAsync(connection.PhoneNumberId, connection.SystemUserToken, customerWaId, text, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Real WhatsApp send failed for business {BusinessId} — continuing without it.", tenantProvider.CurrentBusinessId);
         }
     }
 

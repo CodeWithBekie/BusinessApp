@@ -3,6 +3,7 @@ using AiBusinessPlatform.Api.Contracts;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Domain;
+using AiBusinessPlatform.Domain.Entities;
 using AiBusinessPlatform.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -110,6 +111,41 @@ public static class DashboardEndpoints
 
             var result = await ragTools.IngestDocumentAsync(tenantProvider.CurrentBusinessId, request.Title, request.SourceType ?? "text", request.Content, ct);
             return Results.Ok(result);
+        });
+
+        // Section 12.3/19 — stand-in for Meta's real embedded-signup/OAuth onboarding flow: the
+        // operator pastes in values obtained directly from Meta's own dashboard. Status is set to
+        // Active immediately (confirmed) since no live verification call exists yet to flip it
+        // later; a business has at most one WhatsAppConnection, so this is create-or-update.
+        api.MapPost("/whatsapp/connect", async (
+            WhatsAppConnectRequest request, AiBusinessPlatformDbContext db, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.WabaId) || string.IsNullOrWhiteSpace(request.PhoneNumberId) || string.IsNullOrWhiteSpace(request.SystemUserToken))
+            {
+                return Results.BadRequest("wabaId, phoneNumberId, and systemUserToken are required.");
+            }
+
+            var connection = await db.WhatsAppConnections
+                .FirstOrDefaultAsync(c => c.BusinessId == tenantProvider.CurrentBusinessId, ct);
+
+            if (connection is null)
+            {
+                connection = new WhatsAppConnection
+                {
+                    Id = Guid.NewGuid(),
+                    BusinessId = tenantProvider.CurrentBusinessId,
+                    CreatedAt = DateTimeOffset.UtcNow
+                };
+                db.WhatsAppConnections.Add(connection);
+            }
+
+            connection.WabaId = request.WabaId;
+            connection.PhoneNumberId = request.PhoneNumberId;
+            connection.SystemUserToken = request.SystemUserToken;
+            connection.Status = WhatsAppConnectionStatus.Active;
+
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(connection);
         });
 
         // Proof-of-wiring (Section 10.7): the exact same IHealthTool implementation the Mcp

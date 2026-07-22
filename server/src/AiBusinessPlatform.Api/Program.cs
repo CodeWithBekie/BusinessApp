@@ -7,6 +7,7 @@ using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Infrastructure.Data;
 using AiBusinessPlatform.Infrastructure.Messaging;
 using AiBusinessPlatform.Infrastructure.Tools;
+using AiBusinessPlatform.Infrastructure.WhatsApp;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using OpenAI;
@@ -24,8 +25,12 @@ builder.Services.Configure<RabbitMqOptions>(builder.Configuration.GetSection(Rab
 builder.Services.AddSingleton<IQueuePublisher, RabbitMqQueuePublisher>();
 
 // Dev-only: resolves business_id from an X-Business-Id header (Section 14 will replace this
-// with real JWT-claim-based resolution once auth exists).
-builder.Services.AddScoped<ICurrentTenantProvider, HttpBusinessIdTenantProvider>();
+// with real JWT-claim-based resolution once auth exists). Registered as ONE scoped instance
+// forwarded to both interfaces — a naive AddScoped<T> per interface would create two separate
+// instances and break WhatsAppOrchestratorConsumer's SetBusinessId call (Section 9.3).
+builder.Services.AddScoped<HttpBusinessIdTenantProvider>();
+builder.Services.AddScoped<ICurrentTenantProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
+builder.Services.AddScoped<ICurrentTenantSetter>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
 
 // Section 10.3/10.7 tool contracts — same registrations the Mcp project's host uses, so both
 // entry points resolve to identical implementations.
@@ -74,6 +79,17 @@ builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp 
 
     return openAIClient.GetEmbeddingClient(options.EmbeddingModel).AsIEmbeddingGenerator();
 });
+
+// Section 13.1 — real outbound WhatsApp sends via Meta's Graph API. Base address only carries
+// the host; WhatsAppGraphClient supplies the versioned path per call. A resilience handler covers
+// transient network failures — the app-level try/catch around the send call (see
+// WhatsAppOrchestratorConsumer) still handles genuine failures (bad token, no connection, etc.)
+// without crashing or nacking the queue message.
+builder.Services.Configure<WhatsAppOptions>(builder.Configuration.GetSection(WhatsAppOptions.SectionName));
+builder.Services.AddHttpClient<IWhatsAppSender, WhatsAppGraphClient>(client =>
+{
+    client.BaseAddress = new Uri("https://graph.facebook.com/");
+}).AddStandardResilienceHandler();
 
 builder.Services.AddHostedService<WhatsAppOrchestratorConsumer>();
 builder.Services.AddHostedService<PaymentWebhookConsumer>();
