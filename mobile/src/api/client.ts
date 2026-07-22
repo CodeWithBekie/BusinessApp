@@ -6,11 +6,32 @@ import Constants from 'expo-constants';
 // needs your machine's LAN IP. Not solved in Phase 0; override apiBaseUrl in app.json per target.
 const API_BASE_URL = (Constants.expoConfig?.extra?.apiBaseUrl as string) ?? 'http://localhost:5151';
 
+// Set by AuthProvider (src/auth/AuthContext.tsx) — the simplest way to thread the current session
+// into this plain-function client without rewriting every screen to pass a token through.
+let authToken: string | null = null;
+let onUnauthorized: (() => void) | null = null;
+
+export function setAuthToken(token: string | null) {
+  authToken = token;
+}
+
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  onUnauthorized = handler;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...init?.headers,
+    },
     ...init,
   });
+
+  if (response.status === 401) {
+    onUnauthorized?.();
+  }
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
@@ -25,6 +46,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const apiClient = {
+  login: (email: string, password: string) =>
+    request<AuthResponse>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+
+  signup: (businessName: string, industryType: string, ownerName: string, email: string, password: string) =>
+    request<AuthResponse>('/api/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ businessName, industryType, ownerName, email, password }),
+    }),
+
   getCatalog: () => request<CatalogItem[]>('/api/catalog'),
   getOrders: () => request<Order[]>('/api/orders'),
   getApprovals: () => request<PendingApproval[]>('/api/approvals'),
@@ -48,6 +78,13 @@ export const apiClient = {
       body: JSON.stringify({ wabaId, phoneNumberId, systemUserToken }),
     }),
 };
+
+export interface AuthResponse {
+  token: string;
+  businessId: string;
+  businessUserId: string;
+  role: string;
+}
 
 export interface CatalogItem {
   id: string;

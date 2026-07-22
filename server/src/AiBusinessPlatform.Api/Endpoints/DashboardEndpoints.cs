@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Text.Json;
 using AiBusinessPlatform.Api.Contracts;
 using AiBusinessPlatform.Application.Abstractions;
@@ -13,7 +15,7 @@ public static class DashboardEndpoints
 {
     public static void MapDashboardEndpoints(this WebApplication app)
     {
-        var api = app.MapGroup("/api");
+        var api = app.MapGroup("/api").RequireAuthorization();
 
         // Real EF-backed reads against the (seeded, tenant-filtered) dev DB — proves the data
         // wiring end-to-end without any order/approval workflow logic (out of scope for Phase 0).
@@ -48,7 +50,7 @@ public static class DashboardEndpoints
 
         // Section 10.5 — the ONLY path that can move a PendingApproval out of Pending; never the AI.
         api.MapPost("/approvals/{id:guid}/decision", async (
-            Guid id, ApprovalDecisionRequest request,
+            Guid id, ApprovalDecisionRequest request, ClaimsPrincipal user,
             IApprovalTools approvalTools, IOrderTools orderTools, ICurrentTenantProvider tenantProvider,
             CancellationToken ct) =>
         {
@@ -66,9 +68,10 @@ public static class DashboardEndpoints
                 return Results.BadRequest("decision must be \"approve\" or \"reject\".");
             }
 
-            // Phase 0 gap: no real auth/session exists yet, so the decision-maker defaults to the
-            // seeded dev BusinessUser when the caller doesn't supply one (Section 14/15).
-            var decidedBy = request.DecidedBy ?? DevSeedData.DevBusinessUserId;
+            // The decision-maker is always the authenticated caller's own id — never
+            // client-supplied, since trusting a caller's claim of "who I am" isn't sound once
+            // other businesses' users could plausibly call this endpoint (Section 14/15).
+            var decidedBy = Guid.Parse(user.FindFirstValue(JwtRegisteredClaimNames.Sub)!);
 
             ApprovalDecisionResult decision;
             try

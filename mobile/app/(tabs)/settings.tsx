@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, TextInput } from 'react-native';
 import { apiClient } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
+import { useAuth } from '@/src/auth/AuthContext';
 
 // Section 12.3/19 — stand-in for Meta's real embedded-signup/OAuth flow: the owner pastes in
 // values obtained directly from their Meta dashboard. See WhatsAppOptions/WhatsAppConnectRequest
@@ -119,12 +120,17 @@ function useInputStyle() {
 }
 
 export default function SettingsScreen() {
+  const auth = useAuth();
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Settings</Text>
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
       <WhatsAppConnectForm />
       <DocumentUploadForm />
+      <Pressable style={styles.logoutButton} onPress={auth.logout}>
+        <Text style={styles.logoutButtonText}>Log out</Text>
+      </Pressable>
     </View>
   );
 }

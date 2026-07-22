@@ -101,8 +101,11 @@ public static class WebhooksEndpoints
 
         // Body shape is SimulatedWhatsAppMessage — a stand-in for a real Meta webhook payload,
         // kept working unchanged for local testing without a real Meta account. Resolves
-        // BusinessId via the same ICurrentTenantProvider every dashboard endpoint uses (honors
-        // X-Business-Id), then publishes the same envelope the real path above uses.
+        // BusinessId via the same ICurrentTenantProvider every dashboard endpoint uses (the
+        // authenticated caller's own business_id claim), then publishes the same envelope the real
+        // path above uses. Requires auth — unlike the real Meta/payment webhooks, this endpoint
+        // triggers the flow "as" whichever business the caller is authenticated for, so it can't
+        // be left open the way a real signature-verified webhook can.
         group.MapPost("/whatsapp/simulate", async (
             HttpRequest request, IQueuePublisher queuePublisher, ICurrentTenantProvider tenantProvider,
             ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
@@ -120,7 +123,7 @@ public static class WebhooksEndpoints
             var envelope = new WhatsAppInboundQueueMessage(tenantProvider.CurrentBusinessId, simulated.CustomerNumber, simulated.Text, null);
             await queuePublisher.PublishAsync("whatsapp.inbound", JsonSerializer.Serialize(envelope), cancellationToken);
             return Results.Ok();
-        });
+        }).RequireAuthorization();
 
         // Body shape is SimulatedPaymentWebhook — a stand-in for a real Paynow webhook payload
         // (Section 13.2) until that integration is built. Hit with provider = "manual" for local
