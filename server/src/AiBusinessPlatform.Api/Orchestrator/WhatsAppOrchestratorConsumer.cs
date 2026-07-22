@@ -115,6 +115,7 @@ public class WhatsAppOrchestratorConsumer(
             var db = scope.ServiceProvider.GetRequiredService<AiBusinessPlatformDbContext>();
             var catalogTools = scope.ServiceProvider.GetRequiredService<ICatalogTools>();
             var orderTools = scope.ServiceProvider.GetRequiredService<IOrderTools>();
+            var ragTools = scope.ServiceProvider.GetRequiredService<IRagTools>();
             var tenantProvider = scope.ServiceProvider.GetRequiredService<ICurrentTenantProvider>();
 
             var customer = await GetOrCreateCustomerAsync(db, tenantProvider, envelope.CustomerNumber, stoppingToken);
@@ -166,7 +167,12 @@ public class WhatsAppOrchestratorConsumer(
                 "request_order_cancellation",
                 "Use when a customer wants to cancel an order or get a refund for an order that has ALREADY been paid. This does NOT cancel or refund anything itself — it escalates the request to the business owner for approval. Tell the customer their request has been escalated and they'll hear back; never say the order has been cancelled, refunded, or approved from this call alone.");
 
-            var chatOptions = new ChatOptions { Tools = [checkAvailabilityTool, reserveStockTool, releaseStockTool, createInvoiceTool, requestOrderCancellationTool] };
+            var searchDocumentsTool = AIFunctionFactory.Create(
+                (string query) => ragTools.RetrieveRelevantDocumentsAsync(tenantProvider.CurrentBusinessId, query),
+                "search_business_documents",
+                "Searches this business's own policy/FAQ documents (return policy, delivery areas, opening hours, etc.) for content relevant to a free-text question. Use this before answering any policy/FAQ-style question — never answer those from general knowledge.");
+
+            var chatOptions = new ChatOptions { Tools = [checkAvailabilityTool, reserveStockTool, releaseStockTool, createInvoiceTool, requestOrderCancellationTool, searchDocumentsTool] };
 
             var response = await chatClient.GetResponseAsync(history, chatOptions, stoppingToken);
 
@@ -277,7 +283,16 @@ public class WhatsAppOrchestratorConsumer(
                 "with a decision — never say it's been cancelled, refunded, or approved. If they ask " +
                 "for an update on a previously-escalated request, tell them you'll check and get back " +
                 "to them; do not guess or claim a decision has been made.\n" +
-                "8. Be concise, like a real WhatsApp reply.")
+                "9. If a customer asks a policy/FAQ-style question (e.g. return policy, delivery areas, " +
+                "opening hours, terms) rather than asking about ordering an item, call " +
+                "search_business_documents with their question before answering — never answer such " +
+                "questions from general knowledge or guesswork. If it returns relevant chunks, answer " +
+                "using only that content and end your reply with a short citation line in the form " +
+                "\"(Source: <document title>)\". If it returns nothing relevant, tell the customer " +
+                "honestly that you don't have that information rather than guessing. Do not call " +
+                "search_business_documents for ordering, pricing, or order-status questions — those are " +
+                "handled by the tools in rules 1-7.\n" +
+                "10. Be concise, like a real WhatsApp reply.")
         };
 
         history.AddRange(priorMessages.Select(m => new ChatMessage(

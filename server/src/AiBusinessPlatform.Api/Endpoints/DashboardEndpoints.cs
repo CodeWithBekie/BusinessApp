@@ -98,6 +98,20 @@ public static class DashboardEndpoints
             return Results.Ok(decision);
         });
 
+        // Section 10.6/12.3 — document upload for RAG. Plain-text body only this pass, no
+        // file/PDF upload parsing.
+        api.MapPost("/documents", async (
+            UploadDocumentRequest request, IRagTools ragTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Content))
+            {
+                return Results.BadRequest("title and content are required.");
+            }
+
+            var result = await ragTools.IngestDocumentAsync(tenantProvider.CurrentBusinessId, request.Title, request.SourceType ?? "text", request.Content, ct);
+            return Results.Ok(result);
+        });
+
         // Proof-of-wiring (Section 10.7): the exact same IHealthTool implementation the Mcp
         // project exposes as an MCP tool, called in-process here.
         api.MapGet("/health/ping", async (IHealthTool healthTool, CancellationToken ct) =>

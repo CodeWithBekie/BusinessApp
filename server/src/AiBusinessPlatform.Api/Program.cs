@@ -58,6 +58,23 @@ builder.Services.AddSingleton<IChatClient>(sp =>
     IChatClient innerChatClient = openAIClient.GetChatClient(options.Model).AsIChatClient();
     return new ChatClientBuilder(innerChatClient).UseFunctionInvocation().Build();
 });
+
+// Section 10.6 — RAG embeddings, same LM Studio server as the chat client, different model.
+builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
+{
+    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LmStudioOptions>>().Value;
+    if (string.IsNullOrWhiteSpace(options.EmbeddingModel))
+    {
+        throw new InvalidOperationException("LmStudio:EmbeddingModel is not configured (appsettings.json).");
+    }
+
+    var openAIClient = new OpenAIClient(
+        new ApiKeyCredential(options.ApiKey),
+        new OpenAIClientOptions { Endpoint = new Uri(options.BaseUrl) });
+
+    return openAIClient.GetEmbeddingClient(options.EmbeddingModel).AsIEmbeddingGenerator();
+});
+
 builder.Services.AddHostedService<WhatsAppOrchestratorConsumer>();
 builder.Services.AddHostedService<PaymentWebhookConsumer>();
 

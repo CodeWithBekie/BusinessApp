@@ -5,8 +5,8 @@ namespace AiBusinessPlatform.Infrastructure.Tools;
 // Phase 0 stubs: interfaces + DI wiring exist so Api/Mcp can reference a stable contract now,
 // but real business logic (Section 10.3) is out of scope until Phase 1+. Each method names the
 // doc section it implements, so it's easy to find when the time comes.
-// (CatalogTools, OrderTools, and ApprovalTools have their own real implementations now — see
-// Tools/CatalogTools.cs, Tools/OrderTools.cs, Tools/ApprovalTools.cs.)
+// (CatalogTools, OrderTools, ApprovalTools, and RagTools have their own real implementations now —
+// see Tools/CatalogTools.cs, Tools/OrderTools.cs, Tools/ApprovalTools.cs, Tools/RagTools.cs.)
 
 public class PaymentTools : IPaymentTools
 {
@@ -24,10 +24,4 @@ public class DeliveryTools : IDeliveryTools
 
     public Task<DeliveryStatusResult> GetDeliveryStatusAsync(Guid orderId, CancellationToken cancellationToken = default)
         => throw new NotImplementedException("GetDeliveryStatus — see product-spec-v1.3 Section 4 Phase 1 (delivery automation)");
-}
-
-public class RagTools : IRagTools
-{
-    public Task<IReadOnlyList<RetrievedDocumentChunk>> RetrieveRelevantDocumentsAsync(Guid businessId, string query, CancellationToken cancellationToken = default)
-        => throw new NotImplementedException("RetrieveRelevantDocuments — see product-spec-v1.3 Section 10.6, Phase 2");
 }
