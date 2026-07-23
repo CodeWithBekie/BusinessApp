@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AiBusinessPlatform.Api.Contracts;
 using AiBusinessPlatform.Application.Abstractions;
+using AiBusinessPlatform.Application.Payments;
 using AiBusinessPlatform.Application.WhatsApp;
 using AiBusinessPlatform.Domain;
 using AiBusinessPlatform.Infrastructure.Data;
@@ -125,23 +126,94 @@ public static class WebhooksEndpoints
             return Results.Ok();
         }).RequireAuthorization();
 
-        // Body shape is SimulatedPaymentWebhook — a stand-in for a real Paynow webhook payload
-        // (Section 13.2) until that integration is built. Hit with provider = "manual" for local
-        // testing; PaymentWebhookConsumer consumes payments.manual.inbound.
-        group.MapPost("/payments/{provider}", async (string provider, HttpRequest request, IQueuePublisher queuePublisher, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
+        // Body shape is SimulatedPaymentWebhook — a stand-in for a real Paynow webhook payload,
+        // kept working unchanged for local testing without a real Paynow account. Resolves
+        // BusinessId via the Order the envelope names (Orders always carry BusinessId), then
+        // publishes the same PaymentConfirmedQueueMessage the real path below uses.
+        group.MapPost("/payments/manual", async (
+            HttpRequest request, IQueuePublisher queuePublisher, AiBusinessPlatformDbContext db,
+            ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
         {
             var logger = loggerFactory.CreateLogger("PaymentWebhook");
 
-            var envelope = await request.ReadFromJsonAsync<SimulatedPaymentWebhook>(cancellationToken);
-            if (envelope is null || envelope.OrderId == Guid.Empty || string.IsNullOrWhiteSpace(envelope.Status))
+            var simulated = await request.ReadFromJsonAsync<SimulatedPaymentWebhook>(cancellationToken);
+            if (simulated is null || simulated.OrderId == Guid.Empty || string.IsNullOrWhiteSpace(simulated.Status))
             {
                 return Results.BadRequest("Expected { orderId, providerReference, status } — stand-in for a real Paynow payload (Section 13.2).");
             }
 
-            logger.LogInformation("Received {Provider} payment webhook for order {OrderId} (status: {Status})", provider, envelope.OrderId, envelope.Status);
+            logger.LogInformation("Received manual payment webhook for order {OrderId} (status: {Status})", simulated.OrderId, simulated.Status);
 
-            // TODO: verify provider signature/credentials (Section 13.2, 15) before trusting this payload.
-            await queuePublisher.PublishAsync($"payments.{provider}.inbound", JsonSerializer.Serialize(envelope), cancellationToken);
+            if (!string.Equals(simulated.Status, "confirmed", StringComparison.OrdinalIgnoreCase))
+            {
+                // Only the confirmed path is implemented this pass (known gap, follow-up pass).
+                logger.LogWarning("Manual payment webhook status '{Status}' is not handled — ignoring.", simulated.Status);
+                return Results.Ok();
+            }
+
+            // Pre-tenant lookup: no tenant is resolved yet at this point.
+            var order = await db.Orders.IgnoreQueryFilters().FirstOrDefaultAsync(o => o.Id == simulated.OrderId, cancellationToken);
+            if (order is null)
+            {
+                logger.LogWarning("Manual payment webhook for unknown order {OrderId} — ignoring.", simulated.OrderId);
+                return Results.Ok();
+            }
+
+            var envelope = new PaymentConfirmedQueueMessage(order.BusinessId, order.Id);
+            await queuePublisher.PublishAsync("payments.confirmed", JsonSerializer.Serialize(envelope), cancellationToken);
+            return Results.Ok();
+        });
+
+        // Real Paynow webhook delivery (Section 13.2). Paynow's wire format is
+        // application/x-www-form-urlencoded, not JSON, on both this callback and the poll
+        // response. The webhook carries no business-identifying field directly — only our own
+        // merchant `reference` — so the Payment row it names is looked up first (harmless; the
+        // reference isn't secret), and ONLY THEN is the hash verified using that business's own
+        // PaynowConnection.IntegrationKey, which remains the actual trust gate before anything is
+        // acted on.
+        group.MapPost("/payments/paynow", async (
+            HttpRequest request, IQueuePublisher queuePublisher, AiBusinessPlatformDbContext db,
+            ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
+        {
+            var logger = loggerFactory.CreateLogger("PaymentWebhook");
+
+            using var reader = new StreamReader(request.Body);
+            var rawBody = await reader.ReadToEndAsync(cancellationToken);
+            var fields = PaynowFormCodec.ParseOrdered(rawBody);
+
+            var reference = fields.FirstOrDefault(f => string.Equals(f.Key, "reference", StringComparison.OrdinalIgnoreCase)).Value;
+            if (string.IsNullOrEmpty(reference))
+            {
+                logger.LogWarning("Paynow webhook had no reference field — ignoring.");
+                return Results.Ok();
+            }
+
+            // Pre-tenant lookup: which business this belongs to is exactly what we're resolving.
+            var payment = await db.Payments.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.ProviderReference == reference, cancellationToken);
+            if (payment is null)
+            {
+                logger.LogWarning("Paynow webhook for unknown reference {Reference} — ignoring.", reference);
+                return Results.Ok();
+            }
+
+            var connection = await db.PaynowConnections.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.BusinessId == payment.BusinessId, cancellationToken);
+            if (connection is null || !PaynowHashUtil.Verify(fields, connection.IntegrationKey))
+            {
+                logger.LogWarning("Rejected Paynow webhook for reference {Reference}: invalid or missing hash.", reference);
+                return Results.Unauthorized();
+            }
+
+            var status = fields.FirstOrDefault(f => string.Equals(f.Key, "status", StringComparison.OrdinalIgnoreCase)).Value;
+            if (!string.Equals(status, "paid", StringComparison.OrdinalIgnoreCase))
+            {
+                // Other terminal statuses (Cancelled, Created, Awaiting Delivery, etc.) aren't
+                // reflected back onto the Payment/Order yet — known gap, follow-up pass.
+                logger.LogInformation("Paynow webhook status '{Status}' for reference {Reference} is not handled — ignoring.", status, reference);
+                return Results.Ok();
+            }
+
+            var envelope = new PaymentConfirmedQueueMessage(connection.BusinessId, payment.OrderId);
+            await queuePublisher.PublishAsync("payments.confirmed", JsonSerializer.Serialize(envelope), cancellationToken);
             return Results.Ok();
         });
     }

@@ -63,6 +63,63 @@ function WhatsAppConnectForm() {
   );
 }
 
+// Section 13.2 — connects the business's own Paynow merchant integration for Express Checkout
+// (EcoCash/OneMoney) payments. See PaynowConnectRequest on the Api side.
+function PaynowConnectForm() {
+  const inputStyle = useInputStyle();
+  const [integrationId, setIntegrationId] = useState('');
+  const [integrationKey, setIntegrationKey] = useState('');
+  const [notificationEmail, setNotificationEmail] = useState('');
+  const [status, setStatus] = useState<'idle' | 'saving' | 'error' | 'saved'>('idle');
+  const [message, setMessage] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!integrationId.trim() || !integrationKey.trim() || !notificationEmail.trim()) {
+      setStatus('error');
+      setMessage('All three fields are required.');
+      return;
+    }
+    setStatus('saving');
+    setMessage(null);
+    try {
+      await apiClient.connectPaynow(integrationId.trim(), integrationKey.trim(), notificationEmail.trim());
+      setStatus('saved');
+      setMessage('Connected.');
+    } catch (err) {
+      setStatus('error');
+      setMessage((err as Error).message);
+    }
+  };
+
+  return (
+    <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+      <Text style={styles.cardTitle}>Paynow connection</Text>
+      <Text style={styles.cardSubtitle}>Paste in your Integration ID and Key from your Paynow merchant dashboard.</Text>
+      <TextInput style={inputStyle} placeholder="Integration ID" value={integrationId} onChangeText={setIntegrationId} autoCapitalize="none" />
+      <TextInput
+        style={inputStyle}
+        placeholder="Integration Key"
+        value={integrationKey}
+        onChangeText={setIntegrationKey}
+        autoCapitalize="none"
+        secureTextEntry
+      />
+      <TextInput
+        style={inputStyle}
+        placeholder="Notification email"
+        value={notificationEmail}
+        onChangeText={setNotificationEmail}
+        autoCapitalize="none"
+        keyboardType="email-address"
+      />
+      <Pressable style={styles.button} disabled={status === 'saving'} onPress={submit}>
+        <Text style={styles.buttonText}>{status === 'saving' ? 'Connecting…' : 'Connect'}</Text>
+      </Pressable>
+      {message && <Text style={status === 'error' ? styles.error : styles.success}>{message}</Text>}
+    </View>
+  );
+}
+
 // Section 10.6/12.3 — document upload for RAG. Plain-text body only this pass (matches the Api).
 function DocumentUploadForm() {
   const inputStyle = useInputStyle();
@@ -127,6 +184,7 @@ export default function SettingsScreen() {
       <Text style={styles.title}>Settings</Text>
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
       <WhatsAppConnectForm />
+      <PaynowConnectForm />
       <DocumentUploadForm />
       <Pressable style={styles.logoutButton} onPress={auth.logout}>
         <Text style={styles.logoutButtonText}>Log out</Text>

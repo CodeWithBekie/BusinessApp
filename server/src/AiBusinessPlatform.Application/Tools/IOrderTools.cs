@@ -5,13 +5,20 @@ namespace AiBusinessPlatform.Application.Tools;
 
 public record InvoiceLineItem(Guid CatalogItemId, string Name, int Quantity, decimal UnitPrice, decimal Subtotal);
 
-public record InvoiceResult(Guid OrderId, decimal TotalAmount, string Currency, string PaymentReference, IReadOnlyList<InvoiceLineItem> LineItems);
+// PaymentInstructions is null when no PaynowConnection is configured yet (manual/offline
+// reference); otherwise it's Paynow's own human-readable USSD prompt text (e.g. "Enter your PIN
+// on your phone to authorise this transaction") — the model reads this JSON verbatim when
+// phrasing its reply to the customer, so no orchestrator/system-prompt change is needed beyond
+// this field simply being present.
+public record InvoiceResult(Guid OrderId, decimal TotalAmount, string Currency, string PaymentReference, string? PaymentInstructions, IReadOnlyList<InvoiceLineItem> LineItems);
 
 public record PaymentConfirmationResult(Guid OrderId, Guid PaymentId, OrderStatus OrderStatus, PaymentStatus PaymentStatus);
 
 public record OrderCancellationRequestResult(bool Success, Guid? PendingApprovalId, Guid? OrderId, decimal? Amount, string? Currency, string? Reason);
 
 public record OrderCancellationResult(Guid OrderId, OrderStatus Status);
+
+public record OrderFulfillmentResult(Guid OrderId, OrderStatus Status);
 
 public interface IOrderTools
 {
@@ -36,4 +43,9 @@ public interface IOrderTools
 
     // Deliberately never exposed as an AI tool — same as above, for the rejection outcome.
     Task NotifyOrderCancellationRejectedAsync(Guid businessId, Guid orderId, Guid? decidedBy, CancellationToken cancellationToken = default);
+
+    // FR18 (Section 6.3) — owner manually marks a paid order as delivered/fulfilled. Deliberately
+    // never exposed as an AI tool — this is a business-owner dashboard action, not something a
+    // customer-facing conversation should be able to trigger.
+    Task<OrderFulfillmentResult> MarkOrderFulfilledAsync(Guid businessId, Guid orderId, Guid? decidedBy, CancellationToken cancellationToken = default);
 }

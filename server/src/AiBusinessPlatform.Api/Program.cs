@@ -6,8 +6,10 @@ using AiBusinessPlatform.Api.Tenancy;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Domain.Entities;
+using AiBusinessPlatform.Infrastructure.AI;
 using AiBusinessPlatform.Infrastructure.Data;
 using AiBusinessPlatform.Infrastructure.Messaging;
+using AiBusinessPlatform.Infrastructure.Payments;
 using AiBusinessPlatform.Infrastructure.Tools;
 using AiBusinessPlatform.Infrastructure.WhatsApp;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -111,6 +113,7 @@ builder.Services.AddScoped<IPaymentTools, PaymentTools>();
 builder.Services.AddScoped<IDeliveryTools, DeliveryTools>();
 builder.Services.AddScoped<IApprovalTools, ApprovalTools>();
 builder.Services.AddScoped<IRagTools, RagTools>();
+builder.Services.AddScoped<IInsightsTools, InsightsTools>();
 
 builder.Services.AddHealthChecks()
     .AddNpgSql(builder.Configuration.GetConnectionString("Default") ?? string.Empty, name: "postgres");
@@ -136,19 +139,7 @@ builder.Services.AddSingleton<IChatClient>(sp =>
 
 // Section 10.6 — RAG embeddings, same LM Studio server as the chat client, different model.
 builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
-{
-    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LmStudioOptions>>().Value;
-    if (string.IsNullOrWhiteSpace(options.EmbeddingModel))
-    {
-        throw new InvalidOperationException("LmStudio:EmbeddingModel is not configured (appsettings.json).");
-    }
-
-    var openAIClient = new OpenAIClient(
-        new ApiKeyCredential(options.ApiKey),
-        new OpenAIClientOptions { Endpoint = new Uri(options.BaseUrl) });
-
-    return openAIClient.GetEmbeddingClient(options.EmbeddingModel).AsIEmbeddingGenerator();
-});
+    LmStudioEmbeddingGeneratorFactory.Create(sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LmStudioOptions>>().Value));
 
 // Section 13.1 — real outbound WhatsApp sends via Meta's Graph API. Base address only carries
 // the host; WhatsAppGraphClient supplies the versioned path per call. A resilience handler covers
@@ -160,6 +151,12 @@ builder.Services.AddHttpClient<IWhatsAppSender, WhatsAppGraphClient>(client =>
 {
     client.BaseAddress = new Uri("https://graph.facebook.com/");
 }).AddStandardResilienceHandler();
+
+// Section 13.2 — real outbound Paynow Express Checkout calls. No BaseAddress here since
+// PaynowClient builds full URLs itself from PaynowOptions.BaseUrl (matches the WhatsApp client's
+// resilience-handler pattern).
+builder.Services.Configure<PaynowOptions>(builder.Configuration.GetSection(PaynowOptions.SectionName));
+builder.Services.AddHttpClient<IPaynowClient, PaynowClient>().AddStandardResilienceHandler();
 
 builder.Services.AddHostedService<WhatsAppOrchestratorConsumer>();
 builder.Services.AddHostedService<PaymentWebhookConsumer>();

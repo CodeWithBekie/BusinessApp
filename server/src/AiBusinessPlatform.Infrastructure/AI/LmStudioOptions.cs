@@ -1,4 +1,4 @@
-namespace AiBusinessPlatform.Api.Orchestrator;
+namespace AiBusinessPlatform.Infrastructure.AI;
 
 public class LmStudioOptions
 {

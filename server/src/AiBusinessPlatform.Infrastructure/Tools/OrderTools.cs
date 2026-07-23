@@ -12,7 +12,8 @@ public class OrderTools(
     AiBusinessPlatformDbContext dbContext,
     ICurrentTenantProvider tenantProvider,
     ICatalogTools catalogTools,
-    IApprovalTools approvalTools) : IOrderTools
+    IApprovalTools approvalTools,
+    IPaymentTools paymentTools) : IOrderTools
 {
     public async Task<InvoiceResult> CreateInvoiceAsync(Guid businessId, Guid customerId, CancellationToken cancellationToken = default)
     {
@@ -30,19 +31,26 @@ public class OrderTools(
             throw new InvalidOperationException("Order has no reserved items.");
         }
 
+        var customer = await dbContext.Customers.FirstOrDefaultAsync(c => c.Id == customerId, cancellationToken)
+            ?? throw new InvalidOperationException($"Customer {customerId} not found.");
+
         order.TotalAmount = items.Sum(i => i.Subtotal);
         order.Status = OrderStatus.Invoiced;
         order.UpdatedAt = DateTimeOffset.UtcNow;
 
-        var providerReference = $"INV-{order.Id:N}"[..12].ToUpperInvariant();
+        // Attempts a real Paynow Express Checkout transaction if the business has connected
+        // Paynow; falls back to a manual/offline reference otherwise (Section 13.2).
+        var paymentRequest = await paymentTools.CreatePaymentRequestAsync(
+            businessId, order.Id, order.TotalAmount, order.Currency, customer.WhatsAppNumber, cancellationToken);
 
         var payment = new Payment
         {
             Id = Guid.NewGuid(),
             BusinessId = tenantProvider.CurrentBusinessId,
             OrderId = order.Id,
-            Provider = PaymentProvider.Other,
-            ProviderReference = providerReference,
+            Provider = paymentRequest.PollUrl is not null ? PaymentProvider.EcoCash : PaymentProvider.Other,
+            ProviderReference = paymentRequest.PaymentReference,
+            PollUrl = paymentRequest.PollUrl,
             Amount = order.TotalAmount,
             Status = PaymentStatus.Pending,
             CreatedAt = DateTimeOffset.UtcNow
@@ -60,7 +68,7 @@ public class OrderTools(
             .Select(i => new InvoiceLineItem(i.CatalogItemId, catalogNames.GetValueOrDefault(i.CatalogItemId, "Unknown item"), i.Quantity, i.UnitPrice, i.Subtotal))
             .ToList();
 
-        return new InvoiceResult(order.Id, order.TotalAmount, order.Currency, providerReference, lineItems);
+        return new InvoiceResult(order.Id, order.TotalAmount, order.Currency, paymentRequest.PaymentReference, paymentRequest.Instructions, lineItems);
     }
 
     public async Task<PaymentConfirmationResult> ConfirmPaymentAsync(Guid businessId, Guid orderId, CancellationToken cancellationToken = default)
@@ -234,6 +242,51 @@ public class OrderTools(
         await SendCustomerMessageAsync(order.CustomerId, $"We're sorry, your request to cancel/refund order {order.Id} was not approved. Please contact us if you have questions.", cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<OrderFulfillmentResult> MarkOrderFulfilledAsync(Guid businessId, Guid orderId, Guid? decidedBy, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+
+        var order = await dbContext.Orders.FirstOrDefaultAsync(o => o.Id == orderId, cancellationToken)
+            ?? throw new InvalidOperationException($"Order {orderId} not found.");
+
+        // Idempotent — a retried dashboard call must not re-fulfill/re-notify.
+        if (order.Status == OrderStatus.Fulfilled)
+        {
+            return new OrderFulfillmentResult(order.Id, order.Status);
+        }
+
+        if (order.Status != OrderStatus.Paid)
+        {
+            throw new InvalidOperationException($"Order {orderId} is not Paid (current status: {order.Status}) — cannot mark it fulfilled.");
+        }
+
+        var previousStatus = order.Status;
+        order.Status = OrderStatus.Fulfilled;
+        order.UpdatedAt = DateTimeOffset.UtcNow;
+
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            BusinessId = tenantProvider.CurrentBusinessId,
+            ActorType = AuditActorType.User,
+            ActorId = decidedBy?.ToString() ?? "unknown-dev-decision",
+            Action = "order.fulfilled",
+            EntityType = nameof(Order),
+            EntityId = order.Id.ToString(),
+            BeforeStateJson = JsonSerializer.Serialize(new { Status = previousStatus.ToString() }),
+            AfterStateJson = JsonSerializer.Serialize(new { Status = order.Status.ToString() }),
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        await SendCustomerMessageAsync(order.CustomerId, $"Your order {order.Id} has been fulfilled — thank you for your business!", cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new OrderFulfillmentResult(order.Id, order.Status);
     }
 
     // Shared "find open conversation, add outbound Message" logic — used by ConfirmPaymentAsync's

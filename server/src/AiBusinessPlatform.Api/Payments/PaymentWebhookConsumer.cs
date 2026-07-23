@@ -11,15 +11,16 @@ using RabbitMQ.Client.Events;
 
 namespace AiBusinessPlatform.Api.Payments;
 
-// Local stand-in for a real Paynow webhook consumer (Section 13.2) — consumes the same
-// payments.{provider}.inbound queue shape WebhooksEndpoints already publishes to, using
-// provider = "manual". Mirrors WhatsAppOrchestratorConsumer's connection/resilience pattern.
+// Consumes payments.confirmed — a single, provider-agnostic queue both the simulated
+// /webhooks/payments/manual endpoint and the real /webhooks/payments/paynow endpoint publish to,
+// each having already resolved BusinessId themselves (Section 9.3). Mirrors
+// WhatsAppOrchestratorConsumer's connection/resilience pattern.
 public class PaymentWebhookConsumer(
     IServiceScopeFactory scopeFactory,
     IOptions<RabbitMqOptions> rabbitOptions,
     ILogger<PaymentWebhookConsumer> logger) : BackgroundService
 {
-    private const string QueueName = "payments.manual.inbound";
+    private const string QueueName = "payments.confirmed";
     private readonly RabbitMqOptions _options = rabbitOptions.Value;
     private IConnection? _connection;
     private IChannel? _channel;
@@ -101,20 +102,18 @@ public class PaymentWebhookConsumer(
         try
         {
             var json = Encoding.UTF8.GetString(ea.Body.Span); // copy now — Body is only valid during this callback
-            var envelope = JsonSerializer.Deserialize<SimulatedPaymentWebhook>(json)
+            var envelope = JsonSerializer.Deserialize<PaymentConfirmedQueueMessage>(json)
                 ?? throw new InvalidOperationException("Envelope deserialized to null.");
-
-            if (!string.Equals(envelope.Status, "confirmed", StringComparison.OrdinalIgnoreCase))
-            {
-                // Only the confirmed path is implemented this pass (known gap, follow-up pass).
-                logger.LogWarning("Payment webhook status '{Status}' for order {OrderId} is not handled — acking without action.", envelope.Status, envelope.OrderId);
-                await _channel!.BasicAckAsync(ea.DeliveryTag, multiple: false, stoppingToken);
-                return;
-            }
 
             await using var scope = scopeFactory.CreateAsyncScope();
             var orderTools = scope.ServiceProvider.GetRequiredService<IOrderTools>();
             var tenantProvider = scope.ServiceProvider.GetRequiredService<ICurrentTenantProvider>();
+            var tenantSetter = scope.ServiceProvider.GetRequiredService<ICurrentTenantSetter>();
+
+            // Must happen before any other scoped service resolves/uses tenantProvider — there's
+            // no HttpContext here, so BusinessId (already resolved once at webhook ingress) has
+            // to be pushed in explicitly rather than inferred.
+            tenantSetter.SetBusinessId(envelope.BusinessId);
 
             var result = await orderTools.ConfirmPaymentAsync(tenantProvider.CurrentBusinessId, envelope.OrderId, stoppingToken);
             logger.LogInformation(
@@ -125,7 +124,7 @@ public class PaymentWebhookConsumer(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed processing payments.manual.inbound delivery {DeliveryTag}", ea.DeliveryTag);
+            logger.LogError(ex, "Failed processing payments.confirmed delivery {DeliveryTag}", ea.DeliveryTag);
             try
             {
                 // No dead-letter queue yet (known gap, follow-up pass) — drop rather than

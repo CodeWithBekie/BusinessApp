@@ -1,57 +1,188 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
-import { apiClient, SalesSummary } from '@/src/api/client';
+import { apiClient, SalesRange, SalesSummary } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
+import { useColorScheme } from '@/components/useColorScheme';
+import { formatMoney } from '@/src/common/format';
 
-export default function SalesScreen() {
-  const [summary, setSummary] = useState<SalesSummary | null>(null);
-  const [error, setError] = useState<string | null>(null);
+const RANGES: readonly { value: SalesRange; label: string }[] = [
+  { value: 'today', label: 'Today' },
+  { value: '7d', label: '7 Days' },
+  { value: '30d', label: '30 Days' },
+  { value: 'all', label: 'All time' },
+];
 
-  useEffect(() => {
-    let isMounted = true;
-    apiClient
-      .getSalesSummary()
-      .then((data) => {
-        if (isMounted) setSummary(data);
-      })
-      .catch((err: Error) => {
-        if (isMounted) setError(err.message);
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+const CHART_HEIGHT = 120;
 
+function formatShortDate(iso: string): string {
+  const date = new Date(iso);
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function RangeTabs({ value, onChange }: { value: SalesRange; onChange: (value: SalesRange) => void }) {
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Sales</Text>
-      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
-      {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
-      {!error && !summary && <ActivityIndicator />}
-      {!error && summary && (
-        <View style={styles.tiles}>
-          <View style={styles.tile}>
-            <Text style={styles.tileValue}>{summary.totalOrders}</Text>
-            <Text style={styles.tileLabel}>Paid orders</Text>
-          </View>
-          <View style={styles.tile}>
-            <Text style={styles.tileValue}>{summary.totalAmount}</Text>
-            <Text style={styles.tileLabel}>Total revenue</Text>
-          </View>
-        </View>
-      )}
+    <View style={styles.filterRow} lightColor="transparent" darkColor="transparent">
+      {RANGES.map((r) => {
+        const active = r.value === value;
+        return (
+          <Pressable key={r.value} onPress={() => onChange(r.value)} style={[styles.filterChip, active && styles.filterChipActive]}>
+            <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{r.label}</Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
 
+function TrendChart({ trend }: { trend: SalesSummary['trend'] }) {
+  const colorScheme = useColorScheme();
+  const maxAmount = Math.max(...trend.map((p) => p.totalAmount), 1);
+
+  return (
+    <View style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+      <Text style={styles.sectionTitle}>Daily revenue</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={styles.chartRow} lightColor="transparent" darkColor="transparent">
+          {trend.map((point) => {
+            const height = Math.max((point.totalAmount / maxAmount) * CHART_HEIGHT, 3);
+            return (
+              <View key={point.date} style={styles.chartBarCol} lightColor="transparent" darkColor="transparent">
+                <View style={styles.chartBarTrack}>
+                  <View style={[styles.chartBar, { height }]} />
+                </View>
+                <Text style={[styles.chartLabel, colorScheme === 'dark' ? styles.metaDark : styles.metaLight]}>
+                  {formatShortDate(point.date)}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+export default function SalesScreen() {
+  const colorScheme = useColorScheme();
+  const [range, setRange] = useState<SalesRange>('30d');
+  const [summary, setSummary] = useState<SalesSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback((selectedRange: SalesRange, isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    apiClient
+      .getSalesSummary(selectedRange)
+      .then((data) => {
+        setSummary(data);
+        setError(null);
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setRefreshing(false));
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setSummary(null);
+      load(range);
+    }, [range, load])
+  );
+
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(range, true)} />}
+    >
+      <Text style={styles.title}>Sales</Text>
+      <RangeTabs value={range} onChange={setRange} />
+      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
+
+      {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
+      {!error && summary === null && <ActivityIndicator style={styles.loading} />}
+
+      {!error && summary !== null && (
+        <>
+          <View style={styles.tiles}>
+            <View style={styles.tile} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+              <Text style={styles.tileValue}>{summary.totalOrders}</Text>
+              <Text style={styles.tileLabel}>Paid orders</Text>
+            </View>
+            {summary.totals.length === 0 ? (
+              <View style={styles.tile} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+                <Text style={styles.tileValue}>—</Text>
+                <Text style={styles.tileLabel}>Revenue</Text>
+              </View>
+            ) : (
+              summary.totals.map((t) => (
+                <View key={t.currency} style={styles.tile} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+                  <Text style={styles.tileValue}>{formatMoney(t.totalAmount, t.currency)}</Text>
+                  <Text style={styles.tileLabel}>Revenue ({t.orderCount})</Text>
+                </View>
+              ))
+            )}
+          </View>
+
+          {summary.totalOrders === 0 && (
+            <Text style={styles.empty}>No paid orders in this range yet.</Text>
+          )}
+
+          {summary.trend.length > 0 && <TrendChart trend={summary.trend} />}
+
+          {summary.topItems.length > 0 && (
+            <View style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+              <Text style={styles.sectionTitle}>Top items</Text>
+              {summary.topItems.map((item, index) => (
+                <View key={item.catalogItemId} style={styles.topItemRow} lightColor="transparent" darkColor="transparent">
+                  <View style={styles.topItemNameCol} lightColor="transparent" darkColor="transparent">
+                    <Text style={styles.rowPrimary} numberOfLines={1}>
+                      {index + 1}. {item.name}
+                    </Text>
+                    <Text style={[styles.rowSecondary, colorScheme === 'dark' ? styles.metaDark : styles.metaLight]}>
+                      {item.quantitySold} sold
+                    </Text>
+                  </View>
+                  <Text style={styles.rowPrimary}>{item.revenue.toFixed(2)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </>
+      )}
+    </ScrollView>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 24, paddingHorizontal: 16 },
-  title: { fontSize: 20, fontWeight: 'bold' },
-  separator: { marginVertical: 16, height: 1, width: '100%' },
-  error: { color: '#c0392b' },
-  tiles: { flexDirection: 'row', gap: 16 },
-  tile: { flex: 1, alignItems: 'center', paddingVertical: 24, borderWidth: 1, borderColor: '#ccc', borderRadius: 8 },
-  tileValue: { fontSize: 28, fontWeight: 'bold' },
-  tileLabel: { marginTop: 4 },
+  container: { flex: 1 },
+  content: { paddingTop: 24, paddingHorizontal: 16, paddingBottom: 32 },
+  title: { fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  filterChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#ccc' },
+  filterChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
+  filterChipText: { fontSize: 13, fontWeight: '500', opacity: 0.7 },
+  filterChipTextActive: { color: '#fff', opacity: 1 },
+  separator: { marginTop: 12, marginBottom: 12, height: 1, width: '100%' },
+  loading: { marginTop: 24 },
+  error: { color: '#c0392b', marginBottom: 12 },
+  empty: { opacity: 0.6, marginBottom: 16 },
+  tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 16 },
+  tile: { flexGrow: 1, minWidth: 130, alignItems: 'center', paddingVertical: 20, borderWidth: 1, borderColor: '#ccc', borderRadius: 10 },
+  tileValue: { fontSize: 22, fontWeight: 'bold' },
+  tileLabel: { marginTop: 4, fontSize: 12, opacity: 0.7 },
+  section: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 14, marginBottom: 16 },
+  sectionTitle: { fontSize: 12, fontWeight: '700', opacity: 0.5, textTransform: 'uppercase', marginBottom: 12 },
+  chartRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingBottom: 4 },
+  chartBarCol: { alignItems: 'center', width: 32 },
+  chartBarTrack: { height: CHART_HEIGHT, justifyContent: 'flex-end' },
+  chartBar: { width: 16, backgroundColor: '#007aff', borderRadius: 4 },
+  chartLabel: { fontSize: 10, marginTop: 6 },
+  topItemRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  topItemNameCol: { flexShrink: 1, paddingRight: 12 },
+  rowPrimary: { fontSize: 14, fontWeight: '600' },
+  rowSecondary: { fontSize: 12, marginTop: 2 },
+  metaLight: { color: '#666' },
+  metaDark: { color: '#aaa' },
 });

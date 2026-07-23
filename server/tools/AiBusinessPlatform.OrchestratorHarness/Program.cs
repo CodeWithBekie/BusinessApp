@@ -3,6 +3,7 @@ using System.Text.Json;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Infrastructure.Data;
+using AiBusinessPlatform.Infrastructure.Payments;
 using AiBusinessPlatform.Infrastructure.Tools;
 using AiBusinessPlatform.OrchestratorHarness.Tenancy;
 using Microsoft.EntityFrameworkCore;
@@ -32,6 +33,13 @@ builder.Services.AddDbContext<AiBusinessPlatformDbContext>(options =>
 
 builder.Services.AddScoped<ICurrentTenantProvider, FixedDevTenantProvider>();
 builder.Services.AddScoped<ICatalogTools, CatalogTools>();
+
+// The harness's dev business never has a PaynowConnection configured, so CreatePaymentRequestAsync
+// always takes the manual/offline fallback path — IPaynowClient is only registered here to satisfy
+// OrderTools' constructor dependency, never actually called.
+builder.Services.Configure<PaynowOptions>(builder.Configuration.GetSection(PaynowOptions.SectionName));
+builder.Services.AddHttpClient<IPaynowClient, PaynowClient>();
+builder.Services.AddScoped<IPaymentTools, PaymentTools>();
 builder.Services.AddScoped<IOrderTools, OrderTools>();
 
 using var host = builder.Build();

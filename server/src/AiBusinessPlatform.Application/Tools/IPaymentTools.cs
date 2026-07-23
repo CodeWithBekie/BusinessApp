@@ -2,7 +2,10 @@ using System.ComponentModel;
 
 namespace AiBusinessPlatform.Application.Tools;
 
-public record PaymentRequestResult(string PaymentReference);
+// Instructions/PollUrl are null when no PaynowConnection is configured for the business yet
+// (manual/offline reference stand-in) — non-null once a real Paynow Express Checkout transaction
+// was initiated.
+public record PaymentRequestResult(string PaymentReference, string? Instructions = null, string? PollUrl = null);
 
 public record PaymentStatusResult(string PaymentReference, string Status);
 

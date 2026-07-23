@@ -58,6 +58,8 @@ function RootLayoutNav() {
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="order/[id]" options={{ title: 'Order' }} />
+          <Stack.Screen name="catalog-item/[id]" options={{ title: 'Catalog item', presentation: 'modal' }} />
         </Stack>
       ) : (
         <AuthScreen />

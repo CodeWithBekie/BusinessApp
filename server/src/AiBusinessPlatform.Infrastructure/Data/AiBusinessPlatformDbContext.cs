@@ -33,6 +33,7 @@ public class AiBusinessPlatformDbContext : DbContext
     public DbSet<DocumentChunk> DocumentChunks => Set<DocumentChunk>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<WhatsAppConnection> WhatsAppConnections => Set<WhatsAppConnection>();
+    public DbSet<PaynowConnection> PaynowConnections => Set<PaynowConnection>();
     public DbSet<McpIntegrationAccount> McpIntegrationAccounts => Set<McpIntegrationAccount>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
