@@ -1,11 +1,14 @@
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { createElement, useCallback, useState } from 'react';
+import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
 import { apiClient, SalesRange, SalesSummary } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { formatMoney } from '@/src/common/format';
+
+type FilterValue = SalesRange | 'custom';
 
 const RANGES: readonly { value: SalesRange; label: string }[] = [
   { value: 'today', label: 'Today' },
@@ -16,12 +19,82 @@ const RANGES: readonly { value: SalesRange; label: string }[] = [
 
 const CHART_HEIGHT = 120;
 
+function pad(n: number): string {
+  return n.toString().padStart(2, '0');
+}
+
+// Local date parts, not toISOString() — that converts to UTC and can shift the calendar day
+// picked by the user when their local timezone is behind UTC around midnight.
+function toDateKey(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function formatDisplayDate(date: Date): string {
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
 function formatShortDate(iso: string): string {
   const date = new Date(iso);
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function RangeTabs({ value, onChange }: { value: SalesRange; onChange: (value: SalesRange) => void }) {
+// Native calendar picker, cross-platform: an always-visible native <input type="date"> on web
+// (fastest — no extra tap to open it), a tap-to-open native calendar/spinner dialog elsewhere.
+function DateField({ label, value, onChange }: { label: string; value: Date | null; onChange: (date: Date) => void }) {
+  const colorScheme = useColorScheme();
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const textStyle = colorScheme === 'dark' ? styles.dateInputDark : styles.dateInputLight;
+
+  if (Platform.OS === 'web') {
+    // @react-native-community/datetimepicker has no web implementation (iOS/Android only) — it
+    // silently renders nothing there. A native <input type="date"> gives the same fast,
+    // zero-extra-tap calendar picker the browser already provides, with no extra dependency.
+    return (
+      <View style={styles.dateFieldFlex} lightColor="transparent" darkColor="transparent">
+        {createElement('input', {
+          type: 'date',
+          value: value ? toDateKey(value) : '',
+          onChange: (e: { target: { value: string } }) => {
+            if (e.target.value) onChange(new Date(`${e.target.value}T00:00:00`));
+          },
+          style: {
+            borderWidth: 1,
+            borderColor: '#ccc',
+            borderRadius: 6,
+            paddingHorizontal: 10,
+            paddingVertical: 8,
+            fontSize: 13,
+            fontFamily: 'inherit',
+            color: colorScheme === 'dark' ? '#fff' : '#000',
+            backgroundColor: 'transparent',
+            width: '100%',
+          },
+        })}
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.dateFieldFlex} lightColor="transparent" darkColor="transparent">
+      <Pressable style={styles.dateInput} onPress={() => setPickerVisible(true)}>
+        <Text style={[textStyle, !value && styles.datePlaceholder]}>{value ? formatDisplayDate(value) : label}</Text>
+      </Pressable>
+      {pickerVisible && (
+        <DateTimePicker
+          value={value ?? new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'inline' : 'default'}
+          onChange={(event, selected) => {
+            setPickerVisible(Platform.OS === 'ios' && event.type !== 'dismissed');
+            if (event.type !== 'dismissed' && selected) onChange(selected);
+          }}
+        />
+      )}
+    </View>
+  );
+}
+
+function RangeTabs({ value, onChange }: { value: FilterValue; onChange: (value: FilterValue) => void }) {
   return (
     <View style={styles.filterRow} lightColor="transparent" darkColor="transparent">
       {RANGES.map((r) => {
@@ -32,6 +105,9 @@ function RangeTabs({ value, onChange }: { value: SalesRange; onChange: (value: S
           </Pressable>
         );
       })}
+      <Pressable onPress={() => onChange('custom')} style={[styles.filterChip, value === 'custom' && styles.filterChipActive]}>
+        <Text style={[styles.filterChipText, value === 'custom' && styles.filterChipTextActive]}>Custom…</Text>
+      </Pressable>
     </View>
   );
 }
@@ -65,8 +141,12 @@ function TrendChart({ trend }: { trend: SalesSummary['trend'] }) {
 }
 
 export default function SalesScreen() {
+  const router = useRouter();
   const colorScheme = useColorScheme();
-  const [range, setRange] = useState<SalesRange>('30d');
+  const [filter, setFilter] = useState<FilterValue>('30d');
+  const [fromDate, setFromDate] = useState<Date | null>(null);
+  const [toDate, setToDate] = useState<Date | null>(null);
+  const [dateError, setDateError] = useState<string | null>(null);
   const [summary, setSummary] = useState<SalesSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -83,21 +163,65 @@ export default function SalesScreen() {
       .finally(() => setRefreshing(false));
   }, []);
 
+  const applyCustomRange = useCallback(
+    (isRefresh = false) => {
+      if (!fromDate || !toDate) {
+        setDateError('Pick both a from and to date.');
+        return;
+      }
+      if (fromDate > toDate) {
+        setDateError('The from date must be before the to date.');
+        return;
+      }
+      setDateError(null);
+      if (isRefresh) setRefreshing(true);
+      apiClient
+        .getSalesSummary(undefined, `${toDateKey(fromDate)}T00:00:00Z`, `${toDateKey(toDate)}T23:59:59Z`)
+        .then((data) => {
+          setSummary(data);
+          setError(null);
+        })
+        .catch((err: Error) => setError(err.message))
+        .finally(() => setRefreshing(false));
+    },
+    [fromDate, toDate]
+  );
+
   useFocusEffect(
     useCallback(() => {
+      if (filter === 'custom') return;
       setSummary(null);
-      load(range);
-    }, [range, load])
+      load(filter);
+    }, [filter, load])
   );
 
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(range, true)} />}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={() => (filter === 'custom' ? applyCustomRange(true) : load(filter, true))} />
+      }
     >
-      <Text style={styles.title}>Sales</Text>
-      <RangeTabs value={range} onChange={setRange} />
+      <View style={styles.headerRow} lightColor="transparent" darkColor="transparent">
+        <Text style={styles.title}>Sales</Text>
+        <Pressable style={styles.saleButton} onPress={() => router.push('/pos')}>
+          <Text style={styles.saleButtonText}>+ New sale</Text>
+        </Pressable>
+      </View>
+      <RangeTabs value={filter} onChange={setFilter} />
+
+      {filter === 'custom' && (
+        <View style={styles.customRangeRow} lightColor="transparent" darkColor="transparent">
+          <DateField label="From" value={fromDate} onChange={setFromDate} />
+          <DateField label="To" value={toDate} onChange={setToDate} />
+          <Pressable style={styles.applyButton} onPress={() => applyCustomRange(false)}>
+            <Text style={styles.applyButtonText}>Apply</Text>
+          </Pressable>
+        </View>
+      )}
+      {dateError && <Text style={styles.error}>{dateError}</Text>}
+
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
 
       {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
@@ -158,12 +282,23 @@ export default function SalesScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingTop: 24, paddingHorizontal: 16, paddingBottom: 32 },
-  title: { fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
+  title: { fontSize: 20, fontWeight: 'bold' },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  saleButton: { backgroundColor: '#2e7d32', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  saleButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   filterChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#ccc' },
   filterChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
   filterChipText: { fontSize: 13, fontWeight: '500', opacity: 0.7 },
   filterChipTextActive: { color: '#fff', opacity: 1 },
+  customRangeRow: { flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'center' },
+  dateFieldFlex: { flex: 1 },
+  dateInput: { borderWidth: 1, borderColor: '#ccc', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13 },
+  dateInputLight: { color: '#000' },
+  dateInputDark: { color: '#fff' },
+  datePlaceholder: { opacity: 0.5 },
+  applyButton: { backgroundColor: '#007aff', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 6 },
+  applyButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
   separator: { marginTop: 12, marginBottom: 12, height: 1, width: '100%' },
   loading: { marginTop: 24 },
   error: { color: '#c0392b', marginBottom: 12 },

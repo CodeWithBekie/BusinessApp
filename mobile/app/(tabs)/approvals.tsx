@@ -18,7 +18,13 @@ interface CancelPaidOrderDetails {
   Reason?: string;
 }
 
-// Only action type today (Section 10.5) is cancel_paid_order — parsed for a readable summary.
+interface SendCustomerMessageDetails {
+  CustomerId: string;
+  DraftedText: string;
+  RequestedAt: string;
+}
+
+// Two action types today (Section 10.5, Part 3) — each parsed for a readable summary.
 // Unrecognized action types fall back to raw JSON rather than crashing, so this survives a new
 // action type being added on the backend before the mobile app is updated to understand it.
 function describeDetails(actionType: string, detailsJson: string): { title: string; parsed: CancelPaidOrderDetails | null } {
@@ -29,6 +35,14 @@ function describeDetails(actionType: string, detailsJson: string): { title: stri
         title: `Cancel paid order — ${details.Currency} ${details.Amount}${details.Reason ? ` (${details.Reason})` : ''}`,
         parsed: details,
       };
+    } catch {
+      // fall through to raw JSON below
+    }
+  }
+  if (actionType === 'send_customer_message') {
+    try {
+      const details = JSON.parse(detailsJson) as SendCustomerMessageDetails;
+      return { title: `Send WhatsApp message — "${details.DraftedText}"`, parsed: null };
     } catch {
       // fall through to raw JSON below
     }

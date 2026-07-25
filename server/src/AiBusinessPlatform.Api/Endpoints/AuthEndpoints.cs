@@ -1,10 +1,10 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using AiBusinessPlatform.Api.Auth;
 using AiBusinessPlatform.Api.Contracts;
 using AiBusinessPlatform.Domain;
 using AiBusinessPlatform.Domain.Entities;
+using AiBusinessPlatform.Infrastructure.Auth;
 using AiBusinessPlatform.Infrastructure.Data;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;

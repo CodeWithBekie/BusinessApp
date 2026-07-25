@@ -35,6 +35,9 @@ public class AiBusinessPlatformDbContext : DbContext
     public DbSet<WhatsAppConnection> WhatsAppConnections => Set<WhatsAppConnection>();
     public DbSet<PaynowConnection> PaynowConnections => Set<PaynowConnection>();
     public DbSet<McpIntegrationAccount> McpIntegrationAccounts => Set<McpIntegrationAccount>();
+    public DbSet<Supplier> Suppliers => Set<Supplier>();
+    public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
+    public DbSet<PurchaseOrderItem> PurchaseOrderItems => Set<PurchaseOrderItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

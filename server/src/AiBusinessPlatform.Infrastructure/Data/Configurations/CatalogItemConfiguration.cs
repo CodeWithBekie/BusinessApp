@@ -11,6 +11,7 @@ public class CatalogItemConfiguration : IEntityTypeConfiguration<CatalogItem>
     {
         builder.Property(x => x.Price).HasPrecision(18, 2);
         builder.HasIndex(x => x.BusinessId);
+        builder.HasOne<Business>().WithMany().HasForeignKey(x => x.BusinessId).OnDelete(DeleteBehavior.Restrict);
 
         // Dev seed so the orchestrator harness (and other Phase 0 endpoints) have real catalog
         // data to query against — a hardware-store example, matching the spec's Section 3 pilot.

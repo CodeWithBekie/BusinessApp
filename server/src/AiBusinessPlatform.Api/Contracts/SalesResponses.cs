@@ -9,6 +9,7 @@ public record SalesTopItem(Guid CatalogItemId, string Name, int QuantitySold, de
 public record SalesSummaryResponse(
     string Range,
     DateTimeOffset? RangeStart,
+    DateTimeOffset? RangeEnd,
     int TotalOrders,
     IReadOnlyList<SalesCurrencyTotal> Totals,
     IReadOnlyList<SalesTrendPoint> Trend,

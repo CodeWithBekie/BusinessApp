@@ -14,7 +14,7 @@ public enum MessageDirection { Inbound, Outbound }
 
 public enum OrderStatus { Quoted, Invoiced, Paid, Fulfilled, Cancelled }
 
-public enum PaymentProvider { EcoCash, OneMoney, Other }
+public enum PaymentProvider { EcoCash, Bank, Other, Cash }
 
 public enum PaymentStatus { Pending, Confirmed, Failed }
 
@@ -27,3 +27,5 @@ public enum AuditActorType { System, User }
 public enum WhatsAppConnectionStatus { Pending, Active, Disabled }
 
 public enum McpIntegrationAccountStatus { Active, Revoked }
+
+public enum PurchaseOrderStatus { Draft, Ordered, Received, Cancelled }

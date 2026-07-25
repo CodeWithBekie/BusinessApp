@@ -11,6 +11,7 @@ public record SalesInsightTopItem(Guid CatalogItemId, string Name, int QuantityS
 public record SalesInsight(
     string Range,
     DateTimeOffset? RangeStart,
+    DateTimeOffset? RangeEnd,
     int TotalOrders,
     IReadOnlyList<SalesInsightCurrencyTotal> Totals,
     IReadOnlyList<SalesInsightTrendPoint> Trend,
@@ -21,6 +22,6 @@ public record SalesInsight(
 // get_sales_summary tool, and the MCP server's equivalent tool, so all three can never drift.
 public interface IInsightsTools
 {
-    [Description("Gets a sales summary — order count, revenue totals by currency, a daily revenue trend, and the top-selling catalog items — for a time range. Valid range values: \"today\", \"7d\", \"30d\", \"all\".")]
-    Task<SalesInsight> GetSalesSummaryAsync(Guid businessId, string? range, CancellationToken cancellationToken = default);
+    [Description("Gets a sales summary — order count, revenue totals by currency, a daily revenue trend, and the top-selling catalog items — for a time range. Valid range values: \"today\", \"7d\", \"30d\", \"all\". To use an exact custom date range instead, pass from/to (both required together) — they override range entirely and the result's range is reported as \"custom\".")]
+    Task<SalesInsight> GetSalesSummaryAsync(Guid businessId, string? range, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken cancellationToken = default);
 }

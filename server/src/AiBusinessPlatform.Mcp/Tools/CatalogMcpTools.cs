@@ -1,18 +1,34 @@
 using System.ComponentModel;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
+using AiBusinessPlatform.Domain;
 using ModelContextProtocol.Server;
 
 namespace AiBusinessPlatform.Mcp.Tools;
 
-// Section 10.7 UC7's own example ("check stock for cement at Joe's Hardware") — the same
-// ICatalogTools.CheckAvailabilityAsync the WhatsApp orchestrator calls, exposed here for external
-// AI clients. Read-only: deliberately the only Catalog capability exposed via MCP this pass — see
-// the scope note on OrderMcpTools for why reserve/release/create-invoice aren't exposed yet.
+// Section 10.7 — the same ICatalogTools the WhatsApp orchestrator and dashboard call, exposed here
+// for external AI clients AND the in-app Assistant (which is itself an MCP client of this server,
+// Section 10.2). Reserve/release/finalize stock stay off this list — those are steps in the
+// customer-facing order flow, not something an owner-facing assistant should trigger directly.
 [McpServerToolType]
 public class CatalogMcpTools(ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider)
 {
     [McpServerTool(Name = "check_catalog_availability"), Description("Finds catalog items matching a free-text query and returns price/stock availability.")]
     public Task<IReadOnlyList<CatalogAvailabilityMatch>> CheckAvailability(string itemQuery, CancellationToken cancellationToken)
         => catalogTools.CheckAvailabilityAsync(tenantProvider.CurrentBusinessId, itemQuery, cancellationToken);
+
+    // Nullable parameters need an explicit `= null` default — without one, the MCP SDK's
+    // reflection-based schema generation marks them "required", and a caller that omits an
+    // optional argument (as models routinely do) gets a hard "missing required parameter" error.
+    [McpServerTool(Name = "list_catalog_items"), Description("Lists this business's catalog items, optionally filtered to only active (non-deactivated) items.")]
+    public Task<IReadOnlyList<CatalogItemSummary>> ListCatalogItems(bool? activeOnly = null, CancellationToken cancellationToken = default)
+        => catalogTools.ListCatalogItemsAsync(tenantProvider.CurrentBusinessId, activeOnly, cancellationToken);
+
+    [McpServerTool(Name = "create_catalog_item"), Description("Creates a new catalog item. itemType must be \"Stock\", \"TimeBased\", or \"Quote\". currency defaults to USD, unit defaults to \"each\", stockQuantity only applies to Stock items. Only call this when the owner has clearly and explicitly asked to add a new item.")]
+    public Task<CatalogItemSummary> CreateCatalogItem(string name, CatalogItemType itemType, decimal price, string? currency = null, int? stockQuantity = null, string? unit = null, CancellationToken cancellationToken = default)
+        => catalogTools.CreateCatalogItemAsync(tenantProvider.CurrentBusinessId, name, itemType, price, currency, stockQuantity, unit, cancellationToken);
+
+    [McpServerTool(Name = "update_catalog_item"), Description("Edits an existing catalog item's name, price, currency, unit, stock quantity, and/or active status — only the fields provided are changed. Set active=false to deactivate an item, active=true to reactivate it. Only call this when the owner has clearly and explicitly asked for this change.")]
+    public Task<CatalogItemSummary> UpdateCatalogItem(Guid itemId, string? name = null, decimal? price = null, string? currency = null, int? stockQuantity = null, string? unit = null, bool? active = null, CancellationToken cancellationToken = default)
+        => catalogTools.UpdateCatalogItemAsync(tenantProvider.CurrentBusinessId, itemId, name, price, currency, stockQuantity, unit, active, cancellationToken);
 }

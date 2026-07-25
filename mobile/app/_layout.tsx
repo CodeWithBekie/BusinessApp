@@ -60,6 +60,10 @@ function RootLayoutNav() {
           <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
           <Stack.Screen name="order/[id]" options={{ title: 'Order' }} />
           <Stack.Screen name="catalog-item/[id]" options={{ title: 'Catalog item', presentation: 'modal' }} />
+          <Stack.Screen name="pos" options={{ title: 'New sale', presentation: 'modal' }} />
+          <Stack.Screen name="supplier/[id]" options={{ title: 'Supplier', presentation: 'modal' }} />
+          <Stack.Screen name="purchase-order-new" options={{ title: 'New purchase order', presentation: 'modal' }} />
+          <Stack.Screen name="purchase-order/[id]" options={{ title: 'Purchase order' }} />
         </Stack>
       ) : (
         <AuthScreen />

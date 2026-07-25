@@ -96,4 +96,23 @@ public class ApprovalTools(AiBusinessPlatformDbContext dbContext, ICurrentTenant
         await dbContext.SaveChangesAsync(cancellationToken);
         return new ApprovalDecisionResult(approval.Id, approval.ActionType, approval.DetailsJson, approval.Status.ToString(), WasAlreadyDecided: false);
     }
+
+    public async Task<IReadOnlyList<ApprovalSummary>> ListApprovalsAsync(Guid businessId, ApprovalStatus? status, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+
+        var query = dbContext.PendingApprovals.AsNoTracking().AsQueryable();
+        if (status is not null)
+        {
+            query = query.Where(a => a.Status == status);
+        }
+
+        var approvals = await query.OrderByDescending(a => a.RequestedAt).ToListAsync(cancellationToken);
+        return approvals
+            .Select(a => new ApprovalSummary(a.Id, a.ActionType, a.DetailsJson, a.Status, a.RequestedAt, a.DecidedAt, a.DecidedBy))
+            .ToList();
+    }
 }

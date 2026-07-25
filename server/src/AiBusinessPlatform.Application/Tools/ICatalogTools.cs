@@ -1,8 +1,13 @@
 using System.ComponentModel;
+using AiBusinessPlatform.Domain;
 
 namespace AiBusinessPlatform.Application.Tools;
 
 public record CatalogAvailabilityMatch(Guid CatalogItemId, string Name, decimal Price, string Currency, int? StockQuantity);
+
+public record CatalogItemSummary(
+    Guid Id, string Name, CatalogItemType ItemType, decimal Price, string Currency,
+    int? StockQuantity, string Unit, bool Active, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 
 // Success/Reason let the model read an explicit typed failure (FR12: inform the customer honestly
 // rather than guessing) instead of relying on how the installed function-invocation middleware
@@ -33,4 +38,17 @@ public interface ICatalogTools
     // orderId from the model.
     [Description("Cancels a previously reserved item on the customer's current order by name (e.g. \"cement\"), restoring its stock, without decrementing anything (e.g. the customer changed their mind before paying).")]
     Task<ReserveStockResult> ReleaseStockAsync(Guid businessId, Guid customerId, string itemQuery, CancellationToken cancellationToken = default);
+
+    // FR15 (Section 6.3) — owner-facing catalog management, shared by the dashboard REST endpoints
+    // and the MCP/Assistant tools (Section 10.2/10.7's "one function, multiple entry points").
+    [Description("Lists this business's catalog items, optionally filtered to only active (non-deactivated) items.")]
+    Task<IReadOnlyList<CatalogItemSummary>> ListCatalogItemsAsync(Guid businessId, bool? activeOnly, CancellationToken cancellationToken = default);
+
+    [Description("Creates a new catalog item. itemType must be \"Stock\", \"TimeBased\", or \"Quote\". currency defaults to USD, unit defaults to \"each\", stockQuantity only applies to Stock items.")]
+    Task<CatalogItemSummary> CreateCatalogItemAsync(Guid businessId, string name, CatalogItemType itemType, decimal price, string? currency, int? stockQuantity, string? unit, CancellationToken cancellationToken = default);
+
+    // Partial update — only supplied (non-null) fields change. itemType is deliberately not
+    // patchable here (see UpdateCatalogItemAsync's own remarks).
+    [Description("Edits an existing catalog item's name, price, currency, unit, stock quantity, and/or active status. Only the fields provided are changed; omit a field to leave it as-is. Set active=false to deactivate an item, active=true to reactivate it.")]
+    Task<CatalogItemSummary> UpdateCatalogItemAsync(Guid businessId, Guid itemId, string? name, decimal? price, string? currency, int? stockQuantity, string? unit, bool? active, CancellationToken cancellationToken = default);
 }

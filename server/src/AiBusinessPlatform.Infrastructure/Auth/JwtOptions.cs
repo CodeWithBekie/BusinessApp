@@ -1,7 +1,9 @@
-namespace AiBusinessPlatform.Api.Auth;
+namespace AiBusinessPlatform.Infrastructure.Auth;
 
 // Section 15 — "Access control ... implemented with ASP.NET Core Identity or an equivalent".
-// SigningKey is secret-only (dotnet user-secrets), never in appsettings.json.
+// SigningKey is secret-only (dotnet user-secrets), never in appsettings.json. Shared between the
+// Api project (issues tokens) and the Mcp project (validates them) so both trust the exact same
+// key/issuer/audience — see HttpBusinessIdTenantProvider below.
 public class JwtOptions
 {
     public const string SectionName = "Jwt";

@@ -8,6 +8,11 @@ namespace AiBusinessPlatform.Application.Tools;
 public static class ApprovalActionTypes
 {
     public const string CancelPaidOrder = "cancel_paid_order";
+    public const string SendCustomerMessage = "send_customer_message";
 }
 
 public record CancelPaidOrderDetails(Guid OrderId, Guid CustomerId, decimal Amount, string Currency, string? Reason, DateTimeOffset RequestedAt);
+
+// The draft_customer_message MCP tool (Part 3, sampling) raises this instead of sending directly —
+// only approving it (dashboard or decide_approval) actually sends via WhatsApp.
+public record SendCustomerMessageDetails(Guid CustomerId, string DraftedText, DateTimeOffset RequestedAt);

@@ -9,5 +9,6 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
     public void Configure(EntityTypeBuilder<Customer> builder)
     {
         builder.HasIndex(x => new { x.BusinessId, x.WhatsAppNumber }).IsUnique();
+        builder.HasOne<Business>().WithMany().HasForeignKey(x => x.BusinessId).OnDelete(DeleteBehavior.Restrict);
     }
 }

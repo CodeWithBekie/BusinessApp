@@ -189,4 +189,121 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
 
         return new ReserveStockResult(releasedItemId, true, null);
     }
+
+    public async Task<IReadOnlyList<CatalogItemSummary>> ListCatalogItemsAsync(Guid businessId, bool? activeOnly, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+
+        var query = dbContext.CatalogItems.AsNoTracking().AsQueryable();
+        if (activeOnly == true)
+        {
+            query = query.Where(c => c.Active);
+        }
+
+        var items = await query.OrderBy(c => c.Name).ToListAsync(cancellationToken);
+        return items.Select(ToSummary).ToList();
+    }
+
+    public async Task<CatalogItemSummary> CreateCatalogItemAsync(
+        Guid businessId, string name, CatalogItemType itemType, decimal price, string? currency, int? stockQuantity, string? unit,
+        CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("name is required.", nameof(name));
+        }
+        if (price < 0)
+        {
+            throw new ArgumentException("price cannot be negative.", nameof(price));
+        }
+        if (stockQuantity is < 0)
+        {
+            throw new ArgumentException("stockQuantity cannot be negative.", nameof(stockQuantity));
+        }
+
+        var item = new CatalogItem
+        {
+            Id = Guid.NewGuid(),
+            BusinessId = tenantProvider.CurrentBusinessId,
+            Name = name.Trim(),
+            ItemType = itemType,
+            Price = price,
+            Currency = string.IsNullOrWhiteSpace(currency) ? "USD" : currency.Trim(),
+            StockQuantity = itemType == CatalogItemType.Stock ? stockQuantity ?? 0 : null,
+            Unit = string.IsNullOrWhiteSpace(unit) ? "each" : unit.Trim(),
+            Active = true,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.CatalogItems.Add(item);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ToSummary(item);
+    }
+
+    public async Task<CatalogItemSummary> UpdateCatalogItemAsync(
+        Guid businessId, Guid itemId, string? name, decimal? price, string? currency, int? stockQuantity, string? unit, bool? active,
+        CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+
+        var item = await dbContext.CatalogItems.FirstOrDefaultAsync(c => c.Id == itemId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Catalog item {itemId} not found.");
+
+        if (name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new ArgumentException("name cannot be blank.", nameof(name));
+            }
+            item.Name = name.Trim();
+        }
+        if (price is not null)
+        {
+            if (price < 0)
+            {
+                throw new ArgumentException("price cannot be negative.", nameof(price));
+            }
+            item.Price = price.Value;
+        }
+        if (currency is not null)
+        {
+            item.Currency = string.IsNullOrWhiteSpace(currency) ? item.Currency : currency.Trim();
+        }
+        if (stockQuantity is not null)
+        {
+            if (stockQuantity < 0)
+            {
+                throw new ArgumentException("stockQuantity cannot be negative.", nameof(stockQuantity));
+            }
+            item.StockQuantity = stockQuantity;
+        }
+        if (unit is not null)
+        {
+            item.Unit = string.IsNullOrWhiteSpace(unit) ? item.Unit : unit.Trim();
+        }
+        if (active is not null)
+        {
+            item.Active = active.Value;
+        }
+
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ToSummary(item);
+    }
+
+    private static CatalogItemSummary ToSummary(CatalogItem item) => new(
+        item.Id, item.Name, item.ItemType, item.Price, item.Currency,
+        item.StockQuantity, item.Unit, item.Active, item.CreatedAt, item.UpdatedAt);
 }

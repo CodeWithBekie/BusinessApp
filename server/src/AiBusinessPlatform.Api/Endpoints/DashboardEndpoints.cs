@@ -1,5 +1,3 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
 using System.Text.Json;
 using AiBusinessPlatform.Api.Contracts;
 using AiBusinessPlatform.Application.Abstractions;
@@ -17,179 +15,78 @@ public static class DashboardEndpoints
     {
         var api = app.MapGroup("/api").RequireAuthorization();
 
-        // Real EF-backed reads against the (seeded, tenant-filtered) dev DB — proves the data
-        // wiring end-to-end without any order/approval workflow logic (out of scope for Phase 0).
-        api.MapGet("/catalog", async (AiBusinessPlatformDbContext db, CancellationToken ct) =>
-            await db.CatalogItems.AsNoTracking().OrderBy(c => c.Name).ToListAsync(ct));
+        // FR15 (Section 6.3) — thin mapping over ICatalogTools, the same functions the MCP
+        // server's list_catalog_items/create_catalog_item/update_catalog_item tools call
+        // (Section 10.2/10.7's "one function, multiple entry points").
+        api.MapGet("/catalog", async (ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+            Results.Ok(await catalogTools.ListCatalogItemsAsync(tenantProvider.CurrentBusinessId, activeOnly: null, ct)));
 
-        // FR15 (Section 6.3) — owner adds a catalog item from the dashboard.
         api.MapPost("/catalog", async (
-            CreateCatalogItemRequest request, AiBusinessPlatformDbContext db, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+            CreateCatalogItemRequest request, ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(request.Name))
+            try
             {
-                return Results.BadRequest("name is required.");
+                var item = await catalogTools.CreateCatalogItemAsync(
+                    tenantProvider.CurrentBusinessId, request.Name, request.ItemType, request.Price,
+                    request.Currency, request.StockQuantity, request.Unit, ct);
+                return Results.Created($"/api/catalog/{item.Id}", item);
             }
-            if (request.Price < 0)
+            catch (ArgumentException ex)
             {
-                return Results.BadRequest("price cannot be negative.");
+                return Results.BadRequest(ex.Message);
             }
-            if (request.StockQuantity is < 0)
-            {
-                return Results.BadRequest("stockQuantity cannot be negative.");
-            }
-
-            var item = new CatalogItem
-            {
-                Id = Guid.NewGuid(),
-                BusinessId = tenantProvider.CurrentBusinessId,
-                Name = request.Name.Trim(),
-                ItemType = request.ItemType,
-                Price = request.Price,
-                Currency = string.IsNullOrWhiteSpace(request.Currency) ? "USD" : request.Currency.Trim(),
-                StockQuantity = request.ItemType == CatalogItemType.Stock ? request.StockQuantity ?? 0 : null,
-                Unit = string.IsNullOrWhiteSpace(request.Unit) ? "each" : request.Unit.Trim(),
-                Active = true,
-                CreatedAt = DateTimeOffset.UtcNow,
-                UpdatedAt = DateTimeOffset.UtcNow
-            };
-            db.CatalogItems.Add(item);
-            await db.SaveChangesAsync(ct);
-
-            return Results.Created($"/api/catalog/{item.Id}", item);
         });
 
-        // FR15 — owner edits or deactivates/reactivates a catalog item. Partial update: only
-        // supplied fields change.
         api.MapPatch("/catalog/{id:guid}", async (
-            Guid id, UpdateCatalogItemRequest request, AiBusinessPlatformDbContext db, CancellationToken ct) =>
+            Guid id, UpdateCatalogItemRequest request, ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
         {
-            var item = await db.CatalogItems.FirstOrDefaultAsync(c => c.Id == id, ct);
-            if (item is null)
+            try
+            {
+                var item = await catalogTools.UpdateCatalogItemAsync(
+                    tenantProvider.CurrentBusinessId, id, request.Name, request.Price,
+                    request.Currency, request.StockQuantity, request.Unit, request.Active, ct);
+                return Results.Ok(item);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (KeyNotFoundException)
             {
                 return Results.NotFound();
             }
-
-            if (request.Name is not null)
-            {
-                if (string.IsNullOrWhiteSpace(request.Name))
-                {
-                    return Results.BadRequest("name cannot be blank.");
-                }
-                item.Name = request.Name.Trim();
-            }
-            if (request.Price is not null)
-            {
-                if (request.Price < 0)
-                {
-                    return Results.BadRequest("price cannot be negative.");
-                }
-                item.Price = request.Price.Value;
-            }
-            if (request.Currency is not null)
-            {
-                item.Currency = string.IsNullOrWhiteSpace(request.Currency) ? item.Currency : request.Currency.Trim();
-            }
-            if (request.StockQuantity is not null)
-            {
-                if (request.StockQuantity < 0)
-                {
-                    return Results.BadRequest("stockQuantity cannot be negative.");
-                }
-                item.StockQuantity = request.StockQuantity;
-            }
-            if (request.Unit is not null)
-            {
-                item.Unit = string.IsNullOrWhiteSpace(request.Unit) ? item.Unit : request.Unit.Trim();
-            }
-            if (request.Active is not null)
-            {
-                item.Active = request.Active.Value;
-            }
-
-            item.UpdatedAt = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync(ct);
-
-            return Results.Ok(item);
         });
 
-        // Enriched with customer + item-count so the mobile Orders list doesn't need N follow-up
-        // calls per row; `status` optionally filters to one OrderStatus (case-insensitive, ignored
-        // if unrecognized rather than erroring — matches /sales/summary's lenient `range` param).
-        api.MapGet("/orders", async (string? status, AiBusinessPlatformDbContext db, CancellationToken ct) =>
+        // Thin mapping over IOrderTools, the same functions the MCP server's
+        // list_orders/get_order/mark_order_fulfilled tools call (Section 10.2/10.7's "one
+        // function, multiple entry points"). `status` optionally filters to one OrderStatus
+        // (case-insensitive, ignored if unrecognized rather than erroring — matches
+        // /sales/summary's lenient `range` param).
+        api.MapGet("/orders", async (string? status, IOrderTools orderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
         {
-            var query =
-                from o in db.Orders.AsNoTracking()
-                join c in db.Customers.AsNoTracking() on o.CustomerId equals c.Id
-                select new { o, c };
-
-            if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<OrderStatus>(status, true, out var parsedStatus))
-            {
-                query = query.Where(x => x.o.Status == parsedStatus);
-            }
-
-            var orders = await query
-                .OrderByDescending(x => x.o.CreatedAt)
-                .Select(x => new OrderListItemResponse(
-                    x.o.Id,
-                    x.c.Id,
-                    x.c.WhatsAppNumber,
-                    x.c.Name,
-                    x.o.Status,
-                    x.o.TotalAmount,
-                    x.o.Currency,
-                    db.OrderItems.Count(oi => oi.OrderId == x.o.Id),
-                    x.o.CreatedAt,
-                    x.o.UpdatedAt))
-                .ToListAsync(ct);
-
-            return Results.Ok(orders);
+            OrderStatus? parsedStatus = !string.IsNullOrWhiteSpace(status) && Enum.TryParse<OrderStatus>(status, true, out var s) ? s : null;
+            return Results.Ok(await orderTools.ListOrdersAsync(tenantProvider.CurrentBusinessId, parsedStatus, ct));
         });
 
-        api.MapGet("/orders/{id:guid}", async (Guid id, AiBusinessPlatformDbContext db, CancellationToken ct) =>
+        api.MapGet("/orders/{id:guid}", async (Guid id, IOrderTools orderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
         {
-            var order = await db.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.Id == id, ct);
-            if (order is null)
+            try
+            {
+                return Results.Ok(await orderTools.GetOrderAsync(tenantProvider.CurrentBusinessId, id, ct));
+            }
+            catch (KeyNotFoundException)
             {
                 return Results.NotFound();
             }
-
-            var customer = await db.Customers.AsNoTracking().FirstOrDefaultAsync(c => c.Id == order.CustomerId, ct);
-
-            var items = await (
-                from oi in db.OrderItems.AsNoTracking()
-                join ci in db.CatalogItems.AsNoTracking() on oi.CatalogItemId equals ci.Id into ciJoin
-                from ci in ciJoin.DefaultIfEmpty()
-                where oi.OrderId == order.Id
-                select new OrderLineItemResponse(oi.CatalogItemId, ci != null ? ci.Name : "Unknown item", oi.Quantity, oi.UnitPrice, oi.Subtotal)
-            ).ToListAsync(ct);
-
-            var payment = await db.Payments.AsNoTracking().FirstOrDefaultAsync(p => p.OrderId == order.Id, ct);
-
-            var response = new OrderDetailResponse(
-                order.Id,
-                order.CustomerId,
-                customer?.WhatsAppNumber ?? "",
-                customer?.Name,
-                order.Status,
-                order.TotalAmount,
-                order.Currency,
-                items,
-                payment is null ? null : new OrderPaymentResponse(payment.Provider, payment.ProviderReference, payment.Status, payment.Amount, payment.ConfirmedAt),
-                order.CreatedAt,
-                order.UpdatedAt);
-
-            return Results.Ok(response);
         });
 
         // FR18 (Section 6.3) — owner manually marks a Paid order as delivered/fulfilled.
         api.MapPost("/orders/{id:guid}/fulfill", async (
-            Guid id, ClaimsPrincipal user, IOrderTools orderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+            Guid id, IOrderTools orderTools, ICurrentTenantProvider tenantProvider, ICurrentUserProvider userProvider, CancellationToken ct) =>
         {
-            var decidedBy = Guid.Parse(user.FindFirstValue(JwtRegisteredClaimNames.Sub)!);
             try
             {
-                var result = await orderTools.MarkOrderFulfilledAsync(tenantProvider.CurrentBusinessId, id, decidedBy, ct);
+                var result = await orderTools.MarkOrderFulfilledAsync(tenantProvider.CurrentBusinessId, id, userProvider.CurrentUserId, ct);
                 return Results.Ok(result);
             }
             catch (InvalidOperationException ex)
@@ -198,19 +95,253 @@ public static class DashboardEndpoints
             }
         });
 
-        api.MapGet("/approvals", async (AiBusinessPlatformDbContext db, CancellationToken ct) =>
-            await db.PendingApprovals.AsNoTracking().OrderByDescending(a => a.RequestedAt).ToListAsync(ct));
+        // Manually records/finalizes payment for an order that isn't Paid yet (cash, bank transfer,
+        // etc. collected outside the automated gateway) — thin mapping over
+        // IOrderTools.RecordManualPaymentAsync, the same function the MCP server's
+        // record_order_payment tool calls.
+        api.MapPost("/orders/{id:guid}/payment", async (
+            Guid id, RecordPaymentRequest request, IOrderTools orderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await orderTools.RecordManualPaymentAsync(tenantProvider.CurrentBusinessId, id, request.Provider, request.Reference, request.Amount, ct);
+                return Results.Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        // Corrects the payment method on an order's already-confirmed payment — thin mapping over
+        // IOrderTools.UpdatePaymentProviderAsync, the same function the MCP server's
+        // update_order_payment_provider tool calls.
+        api.MapPatch("/orders/{id:guid}/payment", async (
+            Guid id, UpdatePaymentProviderRequest request, IOrderTools orderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await orderTools.UpdatePaymentProviderAsync(tenantProvider.CurrentBusinessId, id, request.Provider, ct);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        // Point of Sale — records an in-person/walk-in sale that's already been paid for, thin
+        // mapping over IOrderTools.RecordPosSaleAsync (the same function the MCP server's
+        // record_pos_sale tool calls).
+        api.MapPost("/orders/pos-sale", async (
+            PosSaleRequest request, IOrderTools orderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var items = request.Items.Select(i => new PosSaleLineItem(i.CatalogItemId, i.Quantity)).ToList();
+                var result = await orderTools.RecordPosSaleAsync(
+                    tenantProvider.CurrentBusinessId, items, request.PaymentMethod, request.CustomerId, request.CustomerWhatsAppNumber, request.CustomerName,
+                    request.AmountTendered, ct);
+                return Results.Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        // Converts a customer's open quotation (Quoted order) into an Invoiced order with a
+        // pending payment record — thin mapping over IOrderTools.CreateInvoiceAsync, the same
+        // function the WhatsApp orchestrator's checkout flow and the MCP server's create_invoice
+        // tool call.
+        api.MapPost("/orders/{customerId:guid}/invoice", async (
+            Guid customerId, IOrderTools orderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await orderTools.CreateInvoiceAsync(tenantProvider.CurrentBusinessId, customerId, ct);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        // Creates a quotation (Quoted order, no payment yet) from multiple catalog items — thin
+        // mapping over IOrderTools.CreateQuotationAsync, the same function the MCP server's
+        // create_quotation tool calls.
+        api.MapPost("/orders/quotation", async (
+            QuotationRequest request, IOrderTools orderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var items = request.Items.Select(i => new PosSaleLineItem(i.CatalogItemId, i.Quantity)).ToList();
+                var result = await orderTools.CreateQuotationAsync(
+                    tenantProvider.CurrentBusinessId, items, request.CustomerId, request.CustomerWhatsAppNumber, request.CustomerName, ct);
+                return Results.Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        // Printable/downloadable PDF receipt for any order (POS sale, invoice, etc). Not exposed
+        // as an MCP tool — MCP tools return JSON, not files — so the Assistant points the user at
+        // the order to download this from, rather than emitting a PDF itself.
+        api.MapGet("/orders/{id:guid}/receipt", async (
+            Guid id, IDocumentGenerationTools documentTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var pdf = await documentTools.GenerateOrderReceiptAsync(tenantProvider.CurrentBusinessId, id, ct);
+                return Results.File(pdf, "application/pdf", $"receipt-{id:N}.pdf");
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(ex.Message);
+            }
+        });
+
+        // Lets the POS screen (and the Assistant) find an existing customer to attach to a new
+        // sale instead of re-entering their details — thin mapping over
+        // ICustomerTools.ListCustomersAsync, the same function the MCP server's list_customers
+        // tool calls.
+        api.MapGet("/customers", async (string? search, ICustomerTools customerTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+            Results.Ok(await customerTools.ListCustomersAsync(tenantProvider.CurrentBusinessId, search, ct)));
+
+        // Thin mapping over IApprovalTools.ListApprovalsAsync, the same function the MCP server's
+        // list_pending_approvals tool calls.
+        api.MapGet("/approvals", async (IApprovalTools approvalTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+            Results.Ok(await approvalTools.ListApprovalsAsync(tenantProvider.CurrentBusinessId, status: null, ct)));
 
         // FR17 (Section 6.3) — sales summary. Thin mapping over IInsightsTools.GetSalesSummaryAsync
         // — the same function backing the Assistant chat's get_sales_summary tool and the MCP
         // server's equivalent tool (Section 10.2/10.7's "one function, multiple entry points").
-        api.MapGet("/sales/summary", async (string? range, IInsightsTools insightsTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        api.MapGet("/sales/summary", async (string? range, DateTimeOffset? from, DateTimeOffset? to, IInsightsTools insightsTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
         {
-            var insight = await insightsTools.GetSalesSummaryAsync(tenantProvider.CurrentBusinessId, range, ct);
-            var totals = insight.Totals.Select(t => new SalesCurrencyTotal(t.Currency, t.OrderCount, t.TotalAmount)).ToList();
-            var trend = insight.Trend.Select(t => new SalesTrendPoint(t.Date, t.OrderCount, t.TotalAmount)).ToList();
-            var topItems = insight.TopItems.Select(t => new SalesTopItem(t.CatalogItemId, t.Name, t.QuantitySold, t.Revenue)).ToList();
-            return Results.Ok(new SalesSummaryResponse(insight.Range, insight.RangeStart, insight.TotalOrders, totals, trend, topItems));
+            try
+            {
+                var insight = await insightsTools.GetSalesSummaryAsync(tenantProvider.CurrentBusinessId, range, from, to, ct);
+                var totals = insight.Totals.Select(t => new SalesCurrencyTotal(t.Currency, t.OrderCount, t.TotalAmount)).ToList();
+                var trend = insight.Trend.Select(t => new SalesTrendPoint(t.Date, t.OrderCount, t.TotalAmount)).ToList();
+                var topItems = insight.TopItems.Select(t => new SalesTopItem(t.CatalogItemId, t.Name, t.QuantitySold, t.Revenue)).ToList();
+                return Results.Ok(new SalesSummaryResponse(insight.Range, insight.RangeStart, insight.RangeEnd, insight.TotalOrders, totals, trend, topItems));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        // New ground, not a spec section — supplier records + purchase orders to restock from
+        // them, the "buying stock in" counterpart to the customer-facing order/POS model. Thin
+        // mappings over ISupplierTools/IPurchaseOrderTools, the same functions the MCP server's
+        // list_suppliers/create_supplier/list_purchase_orders/create_purchase_order/
+        // receive_purchase_order tools call.
+        api.MapGet("/suppliers", async (string? search, ISupplierTools supplierTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+            Results.Ok(await supplierTools.ListSuppliersAsync(tenantProvider.CurrentBusinessId, search, ct)));
+
+        api.MapPost("/suppliers", async (
+            CreateSupplierRequest request, ISupplierTools supplierTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var supplier = await supplierTools.CreateSupplierAsync(
+                    tenantProvider.CurrentBusinessId, request.Name, request.ContactPhone, request.Email, request.Notes, ct);
+                return Results.Ok(supplier);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        api.MapPatch("/suppliers/{id:guid}", async (
+            Guid id, UpdateSupplierRequest request, ISupplierTools supplierTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var supplier = await supplierTools.UpdateSupplierAsync(
+                    tenantProvider.CurrentBusinessId, id, request.Name, request.ContactPhone, request.Email, request.Notes, request.Active, ct);
+                return Results.Ok(supplier);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(ex.Message);
+            }
+        });
+
+        api.MapGet("/purchase-orders", async (string? status, IPurchaseOrderTools purchaseOrderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            PurchaseOrderStatus? parsedStatus = !string.IsNullOrWhiteSpace(status) && Enum.TryParse<PurchaseOrderStatus>(status, true, out var s) ? s : null;
+            return Results.Ok(await purchaseOrderTools.ListPurchaseOrdersAsync(tenantProvider.CurrentBusinessId, parsedStatus, ct));
+        });
+
+        api.MapGet("/purchase-orders/{id:guid}", async (Guid id, IPurchaseOrderTools purchaseOrderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await purchaseOrderTools.GetPurchaseOrderAsync(tenantProvider.CurrentBusinessId, id, ct));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(ex.Message);
+            }
+        });
+
+        api.MapPost("/purchase-orders", async (
+            CreatePurchaseOrderRequest request, IPurchaseOrderTools purchaseOrderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var items = request.Items.Select(i => new PurchaseOrderLineItem(i.CatalogItemId, i.NewItemName, i.NewItemType, i.NewItemUnit, i.Quantity, i.UnitCost)).ToList();
+                var result = await purchaseOrderTools.CreatePurchaseOrderAsync(tenantProvider.CurrentBusinessId, request.SupplierId, items, request.Currency, ct);
+                return Results.Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        api.MapPost("/purchase-orders/{id:guid}/receive", async (
+            Guid id, ReceivePurchaseOrderRequest? request, IPurchaseOrderTools purchaseOrderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var linePrices = request?.LinePrices?.Select(p => new ReceivedLinePrice(p.PurchaseOrderItemId, p.SalePrice)).ToList();
+                return Results.Ok(await purchaseOrderTools.ReceivePurchaseOrderAsync(tenantProvider.CurrentBusinessId, id, linePrices, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
+        // Printable/downloadable PDF for a supplier purchase order — same shared document layout
+        // as the order receipt above.
+        api.MapGet("/purchase-orders/{id:guid}/document", async (
+            Guid id, IDocumentGenerationTools documentTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var pdf = await documentTools.GeneratePurchaseOrderDocumentAsync(tenantProvider.CurrentBusinessId, id, ct);
+                return Results.File(pdf, "application/pdf", $"purchase-order-{id:N}.pdf");
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(ex.Message);
+            }
         });
 
         // Real order-creation workflow is still out of scope for Phase 0 — orders are only ever
@@ -219,8 +350,9 @@ public static class DashboardEndpoints
 
         // Section 10.5 — the ONLY path that can move a PendingApproval out of Pending; never the AI.
         api.MapPost("/approvals/{id:guid}/decision", async (
-            Guid id, ApprovalDecisionRequest request, ClaimsPrincipal user,
-            IApprovalTools approvalTools, IOrderTools orderTools, ICurrentTenantProvider tenantProvider,
+            Guid id, ApprovalDecisionRequest request,
+            IApprovalTools approvalTools, IOrderTools orderTools, IMessagingTools messagingTools,
+            ICurrentTenantProvider tenantProvider, ICurrentUserProvider userProvider,
             CancellationToken ct) =>
         {
             bool approve;
@@ -240,7 +372,7 @@ public static class DashboardEndpoints
             // The decision-maker is always the authenticated caller's own id — never
             // client-supplied, since trusting a caller's claim of "who I am" isn't sound once
             // other businesses' users could plausibly call this endpoint (Section 14/15).
-            var decidedBy = Guid.Parse(user.FindFirstValue(JwtRegisteredClaimNames.Sub)!);
+            var decidedBy = userProvider.CurrentUserId;
 
             ApprovalDecisionResult decision;
             try
@@ -265,6 +397,14 @@ public static class DashboardEndpoints
                 else
                 {
                     await orderTools.NotifyOrderCancellationRejectedAsync(tenantProvider.CurrentBusinessId, details.OrderId, decidedBy, ct);
+                }
+            }
+            else if (!decision.WasAlreadyDecided && decision.ActionType == ApprovalActionTypes.SendCustomerMessage)
+            {
+                var details = JsonSerializer.Deserialize<SendCustomerMessageDetails>(decision.DetailsJson)!;
+                if (approve)
+                {
+                    await messagingTools.SendApprovedCustomerMessageAsync(tenantProvider.CurrentBusinessId, details.CustomerId, details.DraftedText, ct);
                 }
             }
 

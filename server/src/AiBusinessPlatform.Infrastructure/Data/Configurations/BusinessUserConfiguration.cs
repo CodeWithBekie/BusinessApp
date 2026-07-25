@@ -13,6 +13,8 @@ public class BusinessUserConfiguration : IEntityTypeConfiguration<BusinessUser>
         // before any tenant is known, so email is one-account-per-platform, not per-business.
         builder.HasIndex(x => x.Email).IsUnique();
 
+        builder.HasOne<Business>().WithMany().HasForeignKey(x => x.BusinessId).OnDelete(DeleteBehavior.Restrict);
+
         // Note: HasQueryFilter (applied globally in DbContext.OnModelCreating for ITenantScoped entities)
         // does not affect HasData seeding — the row is inserted by the migration regardless.
         // PasswordHash is a precomputed PasswordHasher<BusinessUser> hash for "DevPassword123!" —

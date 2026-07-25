@@ -1,26 +1,28 @@
-using AiBusinessPlatform.Api.Auth;
+using AiBusinessPlatform.Api.Assistant;
 using AiBusinessPlatform.Api.Endpoints;
 using AiBusinessPlatform.Api.Orchestrator;
 using AiBusinessPlatform.Api.Payments;
-using AiBusinessPlatform.Api.Tenancy;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Domain.Entities;
 using AiBusinessPlatform.Infrastructure.AI;
+using AiBusinessPlatform.Infrastructure.Auth;
 using AiBusinessPlatform.Infrastructure.Data;
 using AiBusinessPlatform.Infrastructure.Messaging;
 using AiBusinessPlatform.Infrastructure.Payments;
 using AiBusinessPlatform.Infrastructure.Tools;
 using AiBusinessPlatform.Infrastructure.WhatsApp;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using OpenAI;
+using QuestPDF.Infrastructure;
 using System.ClientModel;
-using System.Text;
+
+// QuestPDF Community license — free for businesses under $1M/yr revenue, otherwise a paid license
+// (https://www.questpdf.com/license/) — required once at startup before any document is generated.
+QuestPDF.Settings.License = LicenseType.Community;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -62,47 +64,24 @@ builder.Services.AddDbContext<AiBusinessPlatformDbContext>(options =>
 builder.Services.Configure<RabbitMqOptions>(builder.Configuration.GetSection(RabbitMqOptions.SectionName));
 builder.Services.AddSingleton<IQueuePublisher, RabbitMqQueuePublisher>();
 
-// Resolves business_id from the authenticated JWT's business_id claim (Section 14). Registered as
-// ONE scoped instance forwarded to both interfaces — a naive AddScoped<T> per interface would
-// create two separate instances and break WhatsAppOrchestratorConsumer's SetBusinessId call
-// (Section 9.3), which pushes a business_id resolved outside any HttpContext into this same
-// scoped instance.
+// Bridges a mid-tool-call MCP elicitation request (raised inside an in-flight /api/assistant/chat
+// request) to the separate POST /api/assistant/elicit/{id} request the human's answer arrives on —
+// see ElicitationRegistry's own remarks. Process-wide singleton by design (see file for why).
+builder.Services.AddSingleton<ElicitationRegistry>();
+
+// Resolves business_id/user_id from the authenticated JWT (Section 14). Registered as ONE scoped
+// instance forwarded to all three interfaces — a naive AddScoped<T> per interface would create
+// separate instances and break WhatsAppOrchestratorConsumer's SetBusinessId call (Section 9.3),
+// which pushes a business_id resolved outside any HttpContext into this same scoped instance.
 builder.Services.AddScoped<HttpBusinessIdTenantProvider>();
 builder.Services.AddScoped<ICurrentTenantProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
 builder.Services.AddScoped<ICurrentTenantSetter>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
+builder.Services.AddScoped<ICurrentUserProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
 
 // Section 15 — JWT auth. PasswordHasher<BusinessUser> + a hand-issued JWT satisfy "ASP.NET Core
 // Identity or an equivalent" without adopting full Identity's UserManager/table scaffolding.
-builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.AddSingleton<IPasswordHasher<BusinessUser>, PasswordHasher<BusinessUser>>();
-
-var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
-    ?? throw new InvalidOperationException("Jwt configuration section is missing.");
-if (string.IsNullOrWhiteSpace(jwtOptions.SigningKey))
-{
-    throw new InvalidOperationException("Jwt:SigningKey is not configured (dotnet user-secrets).");
-}
-
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        // Without this, the handler remaps short JWT claim names (e.g. "sub") to legacy long-form
-        // URIs on the way in (JwtSecurityTokenHandler.DefaultInboundClaimTypeMap) — so a claim
-        // issued as "sub" is no longer findable via that same name once the principal is built.
-        options.MapInboundClaims = false;
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = jwtOptions.Issuer,
-            ValidateAudience = true,
-            ValidAudience = jwtOptions.Audience,
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SigningKey)),
-            ValidateLifetime = true,
-            ClockSkew = TimeSpan.FromMinutes(1)
-        };
-    });
-builder.Services.AddAuthorization();
+builder.Services.AddPlatformJwtAuthentication(builder.Configuration);
 
 // Section 10.3/10.7 tool contracts — same registrations the Mcp project's host uses, so both
 // entry points resolve to identical implementations.
@@ -114,6 +93,15 @@ builder.Services.AddScoped<IDeliveryTools, DeliveryTools>();
 builder.Services.AddScoped<IApprovalTools, ApprovalTools>();
 builder.Services.AddScoped<IRagTools, RagTools>();
 builder.Services.AddScoped<IInsightsTools, InsightsTools>();
+builder.Services.AddScoped<ICustomerTools, CustomerTools>();
+builder.Services.AddScoped<ISupplierTools, SupplierTools>();
+builder.Services.AddScoped<IPurchaseOrderTools, PurchaseOrderTools>();
+builder.Services.AddScoped<IDocumentGenerationTools, DocumentGenerationTools>();
+builder.Services.AddScoped<IMessagingTools, MessagingTools>();
+
+// Section 10.2 — where the Assistant chat endpoint finds the platform's own MCP server (it
+// connects as a real MCP client, forwarding the caller's own bearer token).
+builder.Services.Configure<McpServerOptions>(builder.Configuration.GetSection(McpServerOptions.SectionName));
 
 builder.Services.AddHealthChecks()
     .AddNpgSql(builder.Configuration.GetConnectionString("Default") ?? string.Empty, name: "postgres");

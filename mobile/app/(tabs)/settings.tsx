@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, TextInput } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
 import { apiClient } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
@@ -64,7 +64,7 @@ function WhatsAppConnectForm() {
 }
 
 // Section 13.2 — connects the business's own Paynow merchant integration for Express Checkout
-// (EcoCash/OneMoney) payments. See PaynowConnectRequest on the Api side.
+// (EcoCash/Bank) payments. See PaynowConnectRequest on the Api side.
 function PaynowConnectForm() {
   const inputStyle = useInputStyle();
   const [integrationId, setIntegrationId] = useState('');
@@ -180,7 +180,7 @@ export default function SettingsScreen() {
   const auth = useAuth();
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Settings</Text>
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
       <WhatsAppConnectForm />
@@ -189,12 +189,13 @@ export default function SettingsScreen() {
       <Pressable style={styles.logoutButton} onPress={auth.logout}>
         <Text style={styles.logoutButtonText}>Log out</Text>
       </Pressable>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 24, paddingHorizontal: 16 },
+  container: { flex: 1 },
+  content: { paddingTop: 24, paddingHorizontal: 16, paddingBottom: 32 },
   title: { fontSize: 20, fontWeight: 'bold' },
   separator: { marginVertical: 16, height: 1, width: '100%' },
   card: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 16 },

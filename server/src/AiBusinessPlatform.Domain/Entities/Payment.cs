@@ -17,6 +17,10 @@ public class Payment : ITenantScoped
     public string? ExternalReference { get; set; }
     public string? PollUrl { get; set; }
 
+    // Cash-tender tracking (POS only) — lets the receipt show what was handed over and the change
+    // given back; ChangeDue is computed at read time (AmountTendered - Amount), never persisted.
+    public decimal? AmountTendered { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? ConfirmedAt { get; set; }
 }
