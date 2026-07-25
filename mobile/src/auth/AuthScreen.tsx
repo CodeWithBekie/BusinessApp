@@ -4,13 +4,43 @@ import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-nativ
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAuth } from '@/src/auth/AuthContext';
+import CustomerAuthScreen from '@/src/auth/CustomerAuthScreen';
 
 // FR1/Section 19 step 1 — "A business can sign up and create a workspace (tenant)." Gates the
 // whole app (see app/_layout.tsx): rendered instead of the tab navigator whenever there's no
 // session. After signup/login, the owner lands in the already-built dashboard tabs to do the rest
 // of onboarding (catalog, WhatsApp connect, documents — Settings tab) with screens that already
 // exist, rather than a separate guided wizard.
+//
+// A "Business owner" vs "I'm shopping" picker gates this business form and the sibling
+// CustomerAuthScreen — the two are otherwise-unrelated identities (see AuthContext's
+// business/customer session kinds), so this is just a router between them, not a shared form.
 export default function AuthScreen() {
+  const [kind, setKind] = useState<'business' | 'customer' | null>(null);
+
+  if (kind === 'customer') {
+    return <CustomerAuthScreen onBack={() => setKind(null)} />;
+  }
+
+  if (kind === null) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Welcome</Text>
+        <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
+        <Pressable style={styles.button} onPress={() => setKind('business')}>
+          <Text style={styles.buttonText}>I'm a business owner</Text>
+        </Pressable>
+        <Pressable style={[styles.button, styles.secondaryButton]} onPress={() => setKind('customer')}>
+          <Text style={[styles.buttonText, styles.secondaryButtonText]}>I'm shopping</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return <BusinessAuthForm onBack={() => setKind(null)} />;
+}
+
+function BusinessAuthForm({ onBack }: { onBack: () => void }) {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const auth = useAuth();
 
@@ -47,6 +77,9 @@ export default function AuthScreen() {
 
   return (
     <View style={styles.container}>
+      <Pressable onPress={onBack} style={styles.back}>
+        <Text style={styles.backText}>← Back</Text>
+      </Pressable>
       <Text style={styles.title}>{mode === 'login' ? 'Log in' : 'Create your business'}</Text>
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
 
@@ -87,12 +120,12 @@ export default function AuthScreen() {
   );
 }
 
-function useInputStyle() {
+export function useInputStyle() {
   const colorScheme = useColorScheme();
   return [styles.input, colorScheme === 'dark' ? styles.inputDark : styles.inputLight];
 }
 
-const styles = StyleSheet.create({
+export const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', paddingHorizontal: 24 },
   title: { fontSize: 22, fontWeight: 'bold', textAlign: 'center' },
   separator: { marginVertical: 16, height: 1, width: '100%' },
@@ -107,8 +140,12 @@ const styles = StyleSheet.create({
   inputLight: { color: '#000' },
   inputDark: { color: '#fff' },
   button: { backgroundColor: '#007aff', paddingVertical: 12, borderRadius: 6, alignItems: 'center', marginTop: 8 },
+  secondaryButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#007aff' },
   buttonText: { color: '#fff', fontWeight: '600' },
+  secondaryButtonText: { color: '#007aff' },
   error: { color: '#c0392b', marginTop: 12, textAlign: 'center' },
   toggle: { marginTop: 20 },
   toggleText: { textAlign: 'center', color: '#007aff' },
+  back: { position: 'absolute', top: 24, left: 0 },
+  backText: { color: '#007aff', fontWeight: '600' },
 });

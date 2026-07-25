@@ -13,7 +13,22 @@ public static class DashboardEndpoints
 {
     public static void MapDashboardEndpoints(this WebApplication app)
     {
-        var api = app.MapGroup("/api").RequireAuthorization();
+        // "BusinessOnly" (not the bare default policy) so a validly-signed customer JWT — which
+        // has no business_id claim — gets a clean 403 here instead of passing auth and then
+        // throwing an unhandled 500 from ICurrentTenantProvider.CurrentBusinessId deeper in.
+        var api = app.MapGroup("/api").RequireAuthorization("BusinessOnly");
+
+        // Business isn't ITenantScoped (it IS the tenant), so this is a plain lookup by the
+        // ambient tenant id — no IgnoreQueryFilters() involved or applicable.
+        api.MapPatch("/business/visibility", async (
+            BusinessVisibilityRequest request, AiBusinessPlatformDbContext db, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            var business = await db.Businesses.FirstOrDefaultAsync(b => b.Id == tenantProvider.CurrentBusinessId, ct)
+                ?? throw new KeyNotFoundException("Business not found.");
+            business.IsPubliclyListed = request.IsPubliclyListed;
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new BusinessVisibilityRequest(business.IsPubliclyListed));
+        });
 
         // FR15 (Section 6.3) — thin mapping over ICatalogTools, the same functions the MCP
         // server's list_catalog_items/create_catalog_item/update_catalog_item tools call
@@ -56,6 +71,70 @@ public static class DashboardEndpoints
                 return Results.NotFound();
             }
         });
+
+        var allowedImageContentTypes = new HashSet<string> { "image/jpeg", "image/png", "image/webp" };
+        const long maxImageBytes = 5 * 1024 * 1024;
+
+        api.MapPut("/catalog/{id:guid}/image", async (
+            Guid id, IFormFile file, ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            if (file.Length == 0)
+            {
+                return Results.BadRequest("A file is required.");
+            }
+            if (file.Length > maxImageBytes)
+            {
+                return Results.BadRequest("Image must be 5MB or smaller.");
+            }
+            if (!allowedImageContentTypes.Contains(file.ContentType))
+            {
+                return Results.BadRequest("Image must be JPEG, PNG, or WebP.");
+            }
+
+            using var stream = new MemoryStream();
+            await file.CopyToAsync(stream, ct);
+
+            try
+            {
+                var item = await catalogTools.SetCatalogItemImageAsync(tenantProvider.CurrentBusinessId, id, stream.ToArray(), file.ContentType, ct);
+                return Results.Ok(item);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        }).DisableAntiforgery();
+
+        api.MapDelete("/catalog/{id:guid}/image", async (
+            Guid id, ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var item = await catalogTools.RemoveCatalogItemImageAsync(tenantProvider.CurrentBusinessId, id, ct);
+                return Results.Ok(item);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
+        // Anonymous and outside the tenant-filtered ICatalogTools path on purpose — an <Image> tag
+        // (native or web) can't attach an Authorization header, so this is served like a public
+        // asset URL, trusted only by the item's unguessable GUID (mirrors how most e-commerce apps
+        // serve product photos). IgnoreQueryFilters() is required here since there's no ambient
+        // tenant (no JWT at all) for the query filter to compare against.
+        app.MapGet("/api/catalog/{id:guid}/image", async (Guid id, AiBusinessPlatformDbContext db, CancellationToken ct) =>
+        {
+            var image = await db.CatalogItems.IgnoreQueryFilters().AsNoTracking()
+                .Where(c => c.Id == id)
+                .Select(c => new { c.ImageData, c.ImageContentType })
+                .FirstOrDefaultAsync(ct);
+
+            return image?.ImageData is null
+                ? Results.NotFound()
+                : Results.File(image.ImageData, image.ImageContentType ?? "application/octet-stream");
+        }).AllowAnonymous();
 
         // Thin mapping over IOrderTools, the same functions the MCP server's
         // list_orders/get_order/mark_order_fulfilled tools call (Section 10.2/10.7's "one

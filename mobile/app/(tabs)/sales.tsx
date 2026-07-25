@@ -7,6 +7,7 @@ import { apiClient, SalesRange, SalesSummary } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { formatMoney } from '@/src/common/format';
+import { useCachedFetch } from '@/src/offline/useCachedFetch';
 
 type FilterValue = SalesRange | 'custom';
 
@@ -147,21 +148,18 @@ export default function SalesScreen() {
   const [fromDate, setFromDate] = useState<Date | null>(null);
   const [toDate, setToDate] = useState<Date | null>(null);
   const [dateError, setDateError] = useState<string | null>(null);
-  const [summary, setSummary] = useState<SalesSummary | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback((selectedRange: SalesRange, isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    apiClient
-      .getSalesSummary(selectedRange)
-      .then((data) => {
-        setSummary(data);
-        setError(null);
-      })
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setRefreshing(false));
-  }, []);
+  const fetchSummary = useCallback(() => {
+    if (filter === 'custom' && fromDate && toDate) {
+      return apiClient.getSalesSummary(undefined, `${toDateKey(fromDate)}T00:00:00Z`, `${toDateKey(toDate)}T23:59:59Z`);
+    }
+    return apiClient.getSalesSummary(filter === 'custom' ? undefined : filter);
+  }, [filter, fromDate, toDate]);
+
+  const cacheKey =
+    filter === 'custom' && fromDate && toDate ? `sales:custom:${toDateKey(fromDate)}:${toDateKey(toDate)}` : `sales:${filter}`;
+
+  const { data: summary, error, refreshing, isFromCache, reload: load } = useCachedFetch<SalesSummary>(cacheKey, fetchSummary);
 
   const applyCustomRange = useCallback(
     (isRefresh = false) => {
@@ -174,24 +172,15 @@ export default function SalesScreen() {
         return;
       }
       setDateError(null);
-      if (isRefresh) setRefreshing(true);
-      apiClient
-        .getSalesSummary(undefined, `${toDateKey(fromDate)}T00:00:00Z`, `${toDateKey(toDate)}T23:59:59Z`)
-        .then((data) => {
-          setSummary(data);
-          setError(null);
-        })
-        .catch((err: Error) => setError(err.message))
-        .finally(() => setRefreshing(false));
+      load(isRefresh);
     },
-    [fromDate, toDate]
+    [fromDate, toDate, load]
   );
 
   useFocusEffect(
     useCallback(() => {
       if (filter === 'custom') return;
-      setSummary(null);
-      load(filter);
+      load();
     }, [filter, load])
   );
 
@@ -200,7 +189,7 @@ export default function SalesScreen() {
       style={styles.container}
       contentContainerStyle={styles.content}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={() => (filter === 'custom' ? applyCustomRange(true) : load(filter, true))} />
+        <RefreshControl refreshing={refreshing} onRefresh={() => (filter === 'custom' ? applyCustomRange(true) : load(true))} />
       }
     >
       <View style={styles.headerRow} lightColor="transparent" darkColor="transparent">
@@ -225,6 +214,7 @@ export default function SalesScreen() {
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
 
       {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
+      {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
       {!error && summary === null && <ActivityIndicator style={styles.loading} />}
 
       {!error && summary !== null && (
@@ -302,6 +292,7 @@ const styles = StyleSheet.create({
   separator: { marginTop: 12, marginBottom: 12, height: 1, width: '100%' },
   loading: { marginTop: 24 },
   error: { color: '#c0392b', marginBottom: 12 },
+  cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
   empty: { opacity: 0.6, marginBottom: 16 },
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 16 },
   tile: { flexGrow: 1, minWidth: 130, alignItems: 'center', paddingVertical: 20, borderWidth: 1, borderColor: '#ccc', borderRadius: 10 },

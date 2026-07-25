@@ -64,7 +64,7 @@ public static class AssistantEndpoints
                 .Concat(templates.Select(t => new AssistantResourceSummary(t.UriTemplate, t.Name, t.Title)))
                 .ToList();
             return Results.Ok(summaries);
-        }).RequireAuthorization();
+        }).RequireAuthorization("BusinessOnly");
 
         // Resolves a pending elicitation raised mid-tool-call by the still-open /api/assistant/chat
         // request above — see ElicitationRegistry's remarks for why this needs a second endpoint at
@@ -74,7 +74,7 @@ public static class AssistantEndpoints
         {
             var resolved = elicitationRegistry.TryResolve(elicitationId, tenantProvider.CurrentBusinessId, new ElicitationAnswer(request.Action, request.Content));
             return resolved ? Results.NoContent() : Results.NotFound();
-        }).RequireAuthorization();
+        }).RequireAuthorization("BusinessOnly");
 
         app.MapPost("/api/assistant/chat", async (
             AssistantChatRequest request, IChatClient chatClient, IOptions<McpServerOptions> mcpServerOptions,
@@ -193,7 +193,7 @@ public static class AssistantEndpoints
             {
                 await WriteSseAsync(response, new { type = "error", message = ex.Message }, cancellationToken);
             }
-        }).RequireAuthorization();
+        }).RequireAuthorization("BusinessOnly");
     }
 
     // The MCP result payload for search_business_documents is a JSON-serialized

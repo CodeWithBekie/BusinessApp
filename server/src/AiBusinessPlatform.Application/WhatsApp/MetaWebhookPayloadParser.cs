@@ -45,4 +45,20 @@ public static class MetaWebhookPayloadParser
         multipleMessagesFound = totalMessagesSeen > 1;
         return result;
     }
+
+    // Unlike TryParseFirstTextMessage, this flattens ALL status entries across entries/changes —
+    // status callbacks routinely batch multiple updates in one webhook delivery.
+    public static IReadOnlyList<MetaWebhookStatus> ExtractStatusUpdates(MetaWebhookPayload payload)
+    {
+        var results = new List<MetaWebhookStatus>();
+        foreach (var entry in payload.Entry ?? [])
+        {
+            foreach (var change in entry.Changes ?? [])
+            {
+                results.AddRange(change.Value.Statuses ?? []);
+            }
+        }
+
+        return results;
+    }
 }

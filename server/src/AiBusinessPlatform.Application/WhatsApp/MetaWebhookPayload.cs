@@ -22,7 +22,11 @@ public record MetaWebhookValue(
     [property: JsonPropertyName("messaging_product")] string? MessagingProduct,
     [property: JsonPropertyName("metadata")] MetaWebhookMetadata Metadata,
     [property: JsonPropertyName("contacts")] IReadOnlyList<MetaWebhookContact>? Contacts,
-    [property: JsonPropertyName("messages")] IReadOnlyList<MetaWebhookMessage>? Messages);
+    [property: JsonPropertyName("messages")] IReadOnlyList<MetaWebhookMessage>? Messages,
+    // Meta sends delivery/read status callbacks (sent/delivered/read/failed) in this array,
+    // alongside (never mixed into) the messages array above — same webhook endpoint, different
+    // payload shape distinguished by which of these two arrays is present.
+    [property: JsonPropertyName("statuses")] IReadOnlyList<MetaWebhookStatus>? Statuses);
 
 public record MetaWebhookMetadata(
     [property: JsonPropertyName("display_phone_number")] string? DisplayPhoneNumber,
@@ -44,3 +48,15 @@ public record MetaWebhookMessage(
 
 public record MetaWebhookText(
     [property: JsonPropertyName("body")] string Body);
+
+public record MetaWebhookStatus(
+    [property: JsonPropertyName("id")] string Id, // the wamid this status is about -> Message.WhatsAppMessageId
+    [property: JsonPropertyName("status")] string Status, // "sent" | "delivered" | "read" | "failed"
+    [property: JsonPropertyName("timestamp")] string? Timestamp, // epoch seconds as a JSON string
+    [property: JsonPropertyName("recipient_id")] string? RecipientId,
+    [property: JsonPropertyName("errors")] IReadOnlyList<MetaWebhookStatusError>? Errors);
+
+public record MetaWebhookStatusError(
+    [property: JsonPropertyName("code")] int Code,
+    [property: JsonPropertyName("title")] string? Title,
+    [property: JsonPropertyName("message")] string? Message);

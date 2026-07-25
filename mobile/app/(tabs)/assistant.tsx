@@ -5,6 +5,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, Sc
 import { apiClient, AssistantResourceSummary, ElicitationSchema, streamAssistantChat } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
+import { useIsOnline } from '@/src/offline/networkStatus';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -25,6 +26,7 @@ const SUGGESTIONS = ['How are sales this week?', 'What were our top-selling item
 
 export default function AssistantScreen() {
   const colorScheme = useColorScheme();
+  const isOnline = useIsOnline();
   const { attachUri, attachLabel } = useLocalSearchParams<{ attachUri?: string; attachLabel?: string }>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -93,7 +95,7 @@ export default function AssistantScreen() {
   const send = useCallback(
     (text: string) => {
       const trimmed = text.trim();
-      if (!trimmed || sending) return;
+      if (!trimmed || sending || !isOnline) return;
 
       setInput('');
       setSending(true);
@@ -144,7 +146,7 @@ export default function AssistantScreen() {
 
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
     },
-    [sending, attachedResources]
+    [sending, isOnline, attachedResources]
   );
 
   return (
@@ -208,8 +210,10 @@ export default function AssistantScreen() {
         </View>
       )}
 
+      {!isOnline && <Text style={styles.error}>You're offline — the Assistant needs a connection.</Text>}
+
       <View style={styles.inputRow} lightColor="transparent" darkColor="transparent">
-        <Pressable style={styles.attachButton} onPress={openAttachSheet}>
+        <Pressable style={[styles.attachButton, !isOnline && styles.sendButtonDisabled]} onPress={openAttachSheet} disabled={!isOnline}>
           <Text style={styles.attachButtonText}>📎</Text>
         </Pressable>
         <TextInput
@@ -218,10 +222,14 @@ export default function AssistantScreen() {
           value={input}
           onChangeText={setInput}
           onSubmitEditing={() => send(input)}
-          editable={!sending}
+          editable={!sending && isOnline}
           returnKeyType="send"
         />
-        <Pressable style={[styles.sendButton, sending && styles.sendButtonDisabled]} disabled={sending} onPress={() => send(input)}>
+        <Pressable
+          style={[styles.sendButton, (sending || !isOnline) && styles.sendButtonDisabled]}
+          disabled={sending || !isOnline}
+          onPress={() => send(input)}
+        >
           <Text style={styles.sendButtonText}>{sending ? '…' : 'Send'}</Text>
         </Pressable>
       </View>

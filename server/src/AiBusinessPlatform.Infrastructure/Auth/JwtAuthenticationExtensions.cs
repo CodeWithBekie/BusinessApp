@@ -42,7 +42,16 @@ public static class JwtAuthenticationExtensions
                     ClockSkew = TimeSpan.FromMinutes(1)
                 };
             });
-        services.AddAuthorization();
+
+        // Turns a wrong-token-type call (a business token hitting a customer-only marketplace
+        // route, or vice versa) into a clean 403 at the framework level, rather than relying on
+        // every endpoint author to manually check ICurrentCustomerProvider/ICurrentTenantProvider
+        // for null/throw.
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy("CustomerOnly", policy => policy.RequireClaim("customer_account_id"));
+            options.AddPolicy("BusinessOnly", policy => policy.RequireClaim("business_id"));
+        });
 
         return services;
     }

@@ -5,6 +5,7 @@ using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Infrastructure.Data;
 using AiBusinessPlatform.Infrastructure.Payments;
 using AiBusinessPlatform.Infrastructure.Tools;
+using AiBusinessPlatform.Infrastructure.WhatsApp;
 using AiBusinessPlatform.OrchestratorHarness.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -40,6 +41,17 @@ builder.Services.AddScoped<ICatalogTools, CatalogTools>();
 builder.Services.Configure<PaynowOptions>(builder.Configuration.GetSection(PaynowOptions.SectionName));
 builder.Services.AddHttpClient<IPaynowClient, PaynowClient>();
 builder.Services.AddScoped<IPaymentTools, PaymentTools>();
+
+// OrderTools' receipt/cancellation-notice messages now go through IWhatsAppMessageService (which
+// needs IWhatsAppSender) instead of only writing a DB row — the harness's dev business never has a
+// WhatsAppConnection configured either, so this always takes the "no connection" fallback path,
+// same accepted shape as the IPaynowClient registration above.
+builder.Services.Configure<WhatsAppOptions>(builder.Configuration.GetSection(WhatsAppOptions.SectionName));
+builder.Services.AddHttpClient<IWhatsAppSender, WhatsAppGraphClient>(client =>
+{
+    client.BaseAddress = new Uri("https://graph.facebook.com/");
+});
+builder.Services.AddScoped<IWhatsAppMessageService, WhatsAppMessageService>();
 builder.Services.AddScoped<IOrderTools, OrderTools>();
 
 using var host = builder.Build();

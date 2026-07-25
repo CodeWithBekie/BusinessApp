@@ -1,38 +1,38 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 
 import { apiClient, setAuthToken, setUnauthorizedHandler } from '@/src/api/client';
+import { clearAllCache } from '@/src/offline/cache';
+import { clearSession, saveSession, type Session } from '@/src/auth/sessionStorage';
 
-interface Session {
-  token: string;
-  businessId: string;
-  businessUserId: string;
-  role: string;
-}
+export type { Session };
 
 interface AuthContextValue {
   session: Session | null;
   login: (email: string, password: string) => Promise<void>;
   signup: (businessName: string, industryType: string, ownerName: string, email: string, password: string) => Promise<void>;
+  customerLogin: (email: string, password: string) => Promise<void>;
+  customerSignup: (email: string, password: string, name?: string, phoneNumber?: string) => Promise<void>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// In-memory only — no expo-secure-store/AsyncStorage persistence (known Phase 0 gap, consistent
-// with other simplifications already in this codebase). The session is lost on every app
-// reload/restart; the user just logs in again.
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
+// Session is persisted to expo-secure-store (see sessionStorage.ts) and restored on app launch
+// by RootLayout, which passes it in as `initialSession`. Only one session (business OR customer)
+// is ever active at a time — the `kind` discriminant is how every consumer branches.
+export function AuthProvider({ children, initialSession = null }: { children: ReactNode; initialSession?: Session | null }) {
+  const [session, setSession] = useState<Session | null>(initialSession);
 
-  const applySession = useCallback((auth: { token: string; businessId: string; businessUserId: string; role: string }) => {
-    setAuthToken(auth.token);
-    setSession({ token: auth.token, businessId: auth.businessId, businessUserId: auth.businessUserId, role: auth.role });
+  const applySession = useCallback((nextSession: Session) => {
+    setAuthToken(nextSession.token);
+    setSession(nextSession);
+    void saveSession(nextSession);
   }, []);
 
   const login = useCallback(
     async (email: string, password: string) => {
       const auth = await apiClient.login(email, password);
-      applySession(auth);
+      applySession({ kind: 'business', token: auth.token, businessId: auth.businessId, businessUserId: auth.businessUserId, role: auth.role });
     },
     [applySession]
   );
@@ -40,7 +40,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signup = useCallback(
     async (businessName: string, industryType: string, ownerName: string, email: string, password: string) => {
       const auth = await apiClient.signup(businessName, industryType, ownerName, email, password);
-      applySession(auth);
+      applySession({ kind: 'business', token: auth.token, businessId: auth.businessId, businessUserId: auth.businessUserId, role: auth.role });
+    },
+    [applySession]
+  );
+
+  const customerLogin = useCallback(
+    async (email: string, password: string) => {
+      const auth = await apiClient.customerLogin(email, password);
+      applySession({ kind: 'customer', token: auth.token, customerAccountId: auth.customerAccountId, email: auth.email, name: auth.name });
+    },
+    [applySession]
+  );
+
+  const customerSignup = useCallback(
+    async (email: string, password: string, name?: string, phoneNumber?: string) => {
+      const auth = await apiClient.customerSignup(email, password, name, phoneNumber);
+      applySession({ kind: 'customer', token: auth.token, customerAccountId: auth.customerAccountId, email: auth.email, name: auth.name });
     },
     [applySession]
   );
@@ -48,13 +64,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     setAuthToken(null);
     setSession(null);
+    void clearSession();
+    void clearAllCache();
   }, []);
 
   // Any 401 from the api client (expired/invalid token) drops back to the login screen instead
   // of screens silently failing forever.
   useMemo(() => setUnauthorizedHandler(() => logout()), [logout]);
 
-  const value = useMemo(() => ({ session, login, signup, logout }), [session, login, signup, logout]);
+  const value = useMemo(
+    () => ({ session, login, signup, customerLogin, customerSignup, logout }),
+    [session, login, signup, customerLogin, customerSignup, logout]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

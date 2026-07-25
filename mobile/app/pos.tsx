@@ -7,6 +7,7 @@ import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { formatMoney } from '@/src/catalog/catalogItemType';
 import { downloadAndShareDocument } from '@/src/documents/downloadAndShare';
+import { useIsOnline } from '@/src/offline/networkStatus';
 
 const PAYMENT_METHODS: readonly PosPaymentMethod[] = ['Cash', 'EcoCash', 'Bank', 'Other'];
 
@@ -118,6 +119,7 @@ function CartRow({ line, onIncrement, onDecrement, onRemove }: { line: CartLine;
 export default function PosScreen() {
   const router = useRouter();
   const inputStyle = useInputStyle();
+  const isOnline = useIsOnline();
 
   const [saleType, setSaleType] = useState<SaleType>('sale');
   const [items, setItems] = useState<CatalogItem[] | null>(null);
@@ -503,10 +505,13 @@ export default function PosScreen() {
             )}
 
             {saveError && <Text style={styles.error}>{saveError}</Text>}
+            {!isOnline && (
+              <Text style={styles.error}>You're offline — connect to complete this {saleType === 'quotation' ? 'quotation' : 'sale'}.</Text>
+            )}
 
             <Pressable
-              style={[styles.button, (saving || cartLines.length === 0) && styles.buttonDisabled]}
-              disabled={saving || cartLines.length === 0}
+              style={[styles.button, (saving || cartLines.length === 0 || !isOnline) && styles.buttonDisabled]}
+              disabled={saving || cartLines.length === 0 || !isOnline}
               onPress={completeSale}
             >
               <Text style={styles.buttonText}>

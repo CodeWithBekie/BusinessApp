@@ -7,6 +7,7 @@ using AiBusinessPlatform.Domain;
 using AiBusinessPlatform.Infrastructure.Data;
 using AiBusinessPlatform.Infrastructure.WhatsApp;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace AiBusinessPlatform.Api.Endpoints;
@@ -71,6 +72,11 @@ public static class WebhooksEndpoints
                 return Results.Ok();
             }
 
+            // Independent of the inbound-message handling below — a pure status-callback payload
+            // (the common case) has no messages array at all, so this must not be gated behind the
+            // "no supported message found" early-return further down.
+            await ApplyStatusUpdatesAsync(payload, db, logger, cancellationToken);
+
             var parsed = MetaWebhookPayloadParser.TryParseFirstTextMessage(payload, out var multipleMessagesFound);
             if (multipleMessagesFound)
             {
@@ -124,7 +130,7 @@ public static class WebhooksEndpoints
             var envelope = new WhatsAppInboundQueueMessage(tenantProvider.CurrentBusinessId, simulated.CustomerNumber, simulated.Text, null);
             await queuePublisher.PublishAsync("whatsapp.inbound", JsonSerializer.Serialize(envelope), cancellationToken);
             return Results.Ok();
-        }).RequireAuthorization();
+        }).RequireAuthorization("BusinessOnly");
 
         // Body shape is SimulatedPaymentWebhook — a stand-in for a real Paynow webhook payload,
         // kept working unchanged for local testing without a real Paynow account. Resolves
@@ -217,4 +223,62 @@ public static class WebhooksEndpoints
             return Results.Ok();
         });
     }
+
+    // Delivery/read status tracking for outbound sends — updates the Message row IWhatsAppMessageService
+    // already created (matched by WhatsAppMessageId/wamid) rather than creating anything new.
+    private static async Task ApplyStatusUpdatesAsync(MetaWebhookPayload payload, AiBusinessPlatformDbContext db, ILogger logger, CancellationToken cancellationToken)
+    {
+        var statusUpdates = MetaWebhookPayloadParser.ExtractStatusUpdates(payload);
+        if (statusUpdates.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var status in statusUpdates)
+        {
+            // Pre-tenant lookup: business isn't known up front — the wamid alone identifies the row.
+            var message = await db.Messages.IgnoreQueryFilters().FirstOrDefaultAsync(m => m.WhatsAppMessageId == status.Id, cancellationToken);
+            if (message is null)
+            {
+                logger.LogInformation("WhatsApp status update for unknown wamid {WamId} — ignoring.", status.Id);
+                continue;
+            }
+
+            switch (status.Status.ToLowerInvariant())
+            {
+                case "delivered":
+                    message.Status = MessageDeliveryStatus.Delivered;
+                    message.DeliveredAt = ParseUnixTimestamp(status.Timestamp) ?? DateTimeOffset.UtcNow;
+                    break;
+                case "read":
+                    message.Status = MessageDeliveryStatus.Read;
+                    message.ReadAt = ParseUnixTimestamp(status.Timestamp) ?? DateTimeOffset.UtcNow;
+                    break;
+                case "failed":
+                    // A Meta-reported async failure (e.g. invalid/opted-out number) isn't the kind
+                    // of transient failure our own send-side retry logic should re-attempt —
+                    // NextAttemptAt stays null (terminal), unlike an our-side send exception.
+                    message.Status = MessageDeliveryStatus.Failed;
+                    message.LastError = status.Errors?.FirstOrDefault()?.Message ?? "Meta reported this message failed to deliver.";
+                    message.NextAttemptAt = null;
+                    break;
+                case "sent":
+                    // Already set at send time by IWhatsAppMessageService — only reaffirm if this
+                    // somehow arrived before that (out-of-order delivery).
+                    if (message.Status == MessageDeliveryStatus.Pending)
+                    {
+                        message.Status = MessageDeliveryStatus.Sent;
+                    }
+                    break;
+                default:
+                    logger.LogInformation("Unrecognized WhatsApp status '{Status}' for wamid {WamId} — ignoring.", status.Status, status.Id);
+                    break;
+            }
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static DateTimeOffset? ParseUnixTimestamp(string? unixSeconds) =>
+        long.TryParse(unixSeconds, out var seconds) ? DateTimeOffset.FromUnixTimeSeconds(seconds) : null;
 }

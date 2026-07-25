@@ -22,6 +22,7 @@ public class AiBusinessPlatformDbContext : DbContext
     public DbSet<CatalogItem> CatalogItems => Set<CatalogItem>();
     public DbSet<TimeSlot> TimeSlots => Set<TimeSlot>();
     public DbSet<Customer> Customers => Set<Customer>();
+    public DbSet<CustomerAccount> CustomerAccounts => Set<CustomerAccount>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<Order> Orders => Set<Order>();

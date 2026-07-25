@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 // Points at the local AiBusinessPlatform.Api dev server (see server/src/AiBusinessPlatform.Api
 // Properties/launchSettings.json for the port). NOTE: `localhost` only resolves from a web
@@ -170,6 +171,31 @@ export const apiClient = {
     request<CatalogItem>('/api/catalog', { method: 'POST', body: JSON.stringify(input) }),
   updateCatalogItem: (id: string, input: UpdateCatalogItemInput) =>
     request<CatalogItem>(`/api/catalog/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  // Anonymous, cache-busted by updatedAt — see DashboardEndpoints.cs's GET /api/catalog/{id}/image
+  // comment for why this endpoint has no auth (an <Image> tag can't attach a bearer token).
+  getCatalogItemImageUrl: (id: string, updatedAt: string) => `${API_BASE_URL}/api/catalog/${id}/image?v=${encodeURIComponent(updatedAt)}`,
+  uploadCatalogItemImage: async (id: string, uri: string, mimeType: string): Promise<CatalogItem> => {
+    const formData = new FormData();
+    if (Platform.OS === 'web') {
+      const blob = await (await fetch(uri)).blob();
+      formData.append('file', blob, `photo.${mimeType.split('/')[1] ?? 'jpg'}`);
+    } else {
+      // React Native's fetch/FormData accepts this {uri, name, type} shape for a file part,
+      // not a real Blob/File (there isn't one on native for a local content:// / file:// uri).
+      formData.append('file', { uri, name: `photo.${mimeType.split('/')[1] ?? 'jpg'}`, type: mimeType } as unknown as Blob);
+    }
+    const response = await fetch(`${API_BASE_URL}/api/catalog/${id}/image`, {
+      method: 'PUT',
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+      body: formData,
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Failed to upload image: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`);
+    }
+    return response.json();
+  },
+  removeCatalogItemImage: (id: string) => request<CatalogItem>(`/api/catalog/${id}/image`, { method: 'DELETE' }),
   getOrders: (status?: OrderStatus) => request<OrderListItem[]>(`/api/orders${status ? `?status=${status}` : ''}`),
   getOrder: (id: string) => request<OrderDetail>(`/api/orders/${id}`),
   markOrderFulfilled: (id: string) => request<OrderFulfillmentResult>(`/api/orders/${id}/fulfill`, { method: 'POST' }),
@@ -254,6 +280,26 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ integrationId, integrationKey, notificationEmail }),
     }),
+
+  setBusinessVisibility: (isPubliclyListed: boolean) =>
+    request<{ isPubliclyListed: boolean }>('/api/business/visibility', { method: 'PATCH', body: JSON.stringify({ isPubliclyListed }) }),
+
+  customerLogin: (email: string, password: string) =>
+    request<CustomerAuthResponse>('/api/customer/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  customerSignup: (email: string, password: string, name?: string, phoneNumber?: string) =>
+    request<CustomerAuthResponse>('/api/customer/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, name, phoneNumber }),
+    }),
+
+  getMarketplaceBusinesses: () => request<PublicBusinessSummary[]>('/api/marketplace/businesses'),
+  getMarketplaceCatalog: (businessId: string) => request<CatalogItem[]>(`/api/marketplace/businesses/${businessId}/catalog`),
+  placeMarketplaceOrder: (businessId: string, items: PosSaleLineItem[]) =>
+    request<MarketplaceOrderResult>(`/api/marketplace/businesses/${businessId}/orders`, {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+  getMyMarketplaceOrders: () => request<MarketplaceOrderSummary[]>('/api/marketplace/my-orders'),
 };
 
 export interface AuthResponse {
@@ -261,6 +307,43 @@ export interface AuthResponse {
   businessId: string;
   businessUserId: string;
   role: string;
+}
+
+export interface CustomerAuthResponse {
+  token: string;
+  customerAccountId: string;
+  email: string;
+  name: string | null;
+}
+
+export interface PublicBusinessSummary {
+  id: string;
+  name: string;
+  industryType: string;
+  currency: string;
+}
+
+export interface MarketplaceOrderResult {
+  orderId: string;
+  businessId: string;
+  businessName: string;
+  totalAmount: number;
+  currency: string;
+  paymentReference: string;
+  paymentInstructions: string | null;
+  lineItems: OrderLineItem[];
+}
+
+export interface MarketplaceOrderSummary {
+  orderId: string;
+  businessId: string;
+  businessName: string;
+  status: OrderStatus;
+  totalAmount: number;
+  currency: string;
+  itemCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type CatalogItemType = 'Stock' | 'TimeBased' | 'Quote';
@@ -276,6 +359,7 @@ export interface CatalogItem {
   active: boolean;
   createdAt: string;
   updatedAt: string;
+  hasImage: boolean;
 }
 
 export interface CreateCatalogItemInput {

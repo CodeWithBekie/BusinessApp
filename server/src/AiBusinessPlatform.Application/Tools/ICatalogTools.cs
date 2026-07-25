@@ -7,7 +7,9 @@ public record CatalogAvailabilityMatch(Guid CatalogItemId, string Name, decimal 
 
 public record CatalogItemSummary(
     Guid Id, string Name, CatalogItemType ItemType, decimal Price, string Currency,
-    int? StockQuantity, string Unit, bool Active, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+    int? StockQuantity, string Unit, bool Active, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, bool HasImage);
+
+public record CatalogItemImage(byte[] Data, string ContentType);
 
 // Success/Reason let the model read an explicit typed failure (FR12: inform the customer honestly
 // rather than guessing) instead of relying on how the installed function-invocation middleware
@@ -51,4 +53,12 @@ public interface ICatalogTools
     // patchable here (see UpdateCatalogItemAsync's own remarks).
     [Description("Edits an existing catalog item's name, price, currency, unit, stock quantity, and/or active status. Only the fields provided are changed; omit a field to leave it as-is. Set active=false to deactivate an item, active=true to reactivate it.")]
     Task<CatalogItemSummary> UpdateCatalogItemAsync(Guid businessId, Guid itemId, string? name, decimal? price, string? currency, int? stockQuantity, string? unit, bool? active, CancellationToken cancellationToken = default);
+
+    // Not exposed to the AI assistant/MCP — a narrow, transport-facing capability (raw bytes),
+    // not a business action the model has any reason to see or set.
+    Task<CatalogItemImage?> GetCatalogItemImageAsync(Guid businessId, Guid itemId, CancellationToken cancellationToken = default);
+
+    Task<CatalogItemSummary> SetCatalogItemImageAsync(Guid businessId, Guid itemId, byte[] imageData, string contentType, CancellationToken cancellationToken = default);
+
+    Task<CatalogItemSummary> RemoveCatalogItemImageAsync(Guid businessId, Guid itemId, CancellationToken cancellationToken = default);
 }

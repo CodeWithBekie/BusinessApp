@@ -6,5 +6,6 @@ public class Customer : ITenantScoped
     public Guid BusinessId { get; set; }
     public string WhatsAppNumber { get; set; } = string.Empty;
     public string? Name { get; set; }
+    public Guid? CustomerAccountId { get; set; } // links to the marketplace login identity, if any
     public DateTimeOffset CreatedAt { get; set; }
 }

@@ -193,19 +193,10 @@ public class WhatsAppOrchestratorConsumer(
 
             LogToolActivity(response);
 
-            db.Messages.Add(new Message
-            {
-                Id = Guid.NewGuid(),
-                BusinessId = tenantProvider.CurrentBusinessId,
-                ConversationId = conversation.Id,
-                Direction = MessageDirection.Outbound,
-                Content = response.Text,
-                CreatedAt = DateTimeOffset.UtcNow
-            });
-            await db.SaveChangesAsync(stoppingToken);
-
-            var whatsAppSender = scope.ServiceProvider.GetRequiredService<IWhatsAppSender>();
-            await TrySendRealWhatsAppMessageAsync(whatsAppSender, db, tenantProvider, envelope.CustomerNumber, response.Text ?? string.Empty, stoppingToken);
+            // IWhatsAppMessageService persists the outbound Message itself (into this same open
+            // conversation) as part of sending it — no separate manual insert needed here anymore.
+            var whatsAppMessageService = scope.ServiceProvider.GetRequiredService<IWhatsAppMessageService>();
+            await TrySendRealWhatsAppMessageAsync(whatsAppMessageService, tenantProvider, customer.Id, response.Text ?? string.Empty, stoppingToken);
 
             await _channel!.BasicAckAsync(ea.DeliveryTag, multiple: false, stoppingToken);
         }
@@ -226,33 +217,30 @@ public class WhatsAppOrchestratorConsumer(
     }
 
     // A failed send must never nack the queue message or crash the consumer: the AI turn's side
-    // effects (reservations, invoices) already committed above, and there's no dead-letter queue
-    // to safely retry into. This is expected to fail until a real Meta connection is configured.
+    // effects (reservations, invoices) already committed above. IWhatsAppMessageService itself now
+    // persists the failure with retry scheduling (WhatsAppRetryHostedService picks it up later) —
+    // this wrapper's only remaining job is to make sure a send failure can never escape and crash
+    // the consumer/nack the queue message.
     private async Task TrySendRealWhatsAppMessageAsync(
-        IWhatsAppSender whatsAppSender, AiBusinessPlatformDbContext db, ICurrentTenantProvider tenantProvider,
-        string customerWaId, string text, CancellationToken ct)
+        IWhatsAppMessageService whatsAppMessageService, ICurrentTenantProvider tenantProvider,
+        Guid customerId, string text, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
         try
         {
-            var connection = await db.WhatsAppConnections
-                .FirstOrDefaultAsync(c => c.BusinessId == tenantProvider.CurrentBusinessId && c.Status == WhatsAppConnectionStatus.Active, ct);
-
-            if (connection is null)
+            var result = await whatsAppMessageService.SendAsync(tenantProvider.CurrentBusinessId, customerId, text, ct);
+            if (!result.Success)
             {
-                logger.LogInformation("No active WhatsAppConnection for business {BusinessId} — skipping real send.", tenantProvider.CurrentBusinessId);
-                return;
+                logger.LogWarning("WhatsApp send failed for business {BusinessId}: {Error} — queued for retry.", tenantProvider.CurrentBusinessId, result.ErrorMessage);
             }
-
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return;
-            }
-
-            await whatsAppSender.SendTextMessageAsync(connection.PhoneNumberId, connection.SystemUserToken, customerWaId, text, ct);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Real WhatsApp send failed for business {BusinessId} — continuing without it.", tenantProvider.CurrentBusinessId);
+            logger.LogWarning(ex, "WhatsApp send threw unexpectedly for business {BusinessId} — continuing without it.", tenantProvider.CurrentBusinessId);
         }
     }
 

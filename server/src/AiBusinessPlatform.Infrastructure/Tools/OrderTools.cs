@@ -14,7 +14,8 @@ public class OrderTools(
     ICurrentTenantProvider tenantProvider,
     ICatalogTools catalogTools,
     IApprovalTools approvalTools,
-    IPaymentTools paymentTools) : IOrderTools
+    IPaymentTools paymentTools,
+    IWhatsAppMessageService whatsAppMessageService) : IOrderTools
 {
     public async Task<InvoiceResult> CreateInvoiceAsync(Guid businessId, Guid customerId, CancellationToken cancellationToken = default)
     {
@@ -793,24 +794,12 @@ public class OrderTools(
         return customer;
     }
 
-    // Shared "find open conversation, add outbound Message" logic — used by ConfirmPaymentAsync's
-    // receipt and both cancellation-outcome messages above. Deterministic/templated by design:
-    // financial and status-changing confirmations should never be model-generated.
+    // Deterministic/templated by design: financial and status-changing confirmations should never
+    // be model-generated. Delegates the actual send + persistence to IWhatsAppMessageService (the
+    // one shared place every WhatsApp send goes through) — previously this only wrote a DB row and
+    // never called IWhatsAppSender at all, so these messages never actually reached WhatsApp.
     private async Task SendCustomerMessageAsync(Guid customerId, string content, CancellationToken cancellationToken)
     {
-        var conversation = await dbContext.Conversations
-            .FirstOrDefaultAsync(c => c.CustomerId == customerId && c.Status == ConversationStatus.Open, cancellationToken);
-        if (conversation is not null)
-        {
-            dbContext.Messages.Add(new Message
-            {
-                Id = Guid.NewGuid(),
-                BusinessId = tenantProvider.CurrentBusinessId,
-                ConversationId = conversation.Id,
-                Direction = MessageDirection.Outbound,
-                Content = content,
-                CreatedAt = DateTimeOffset.UtcNow
-            });
-        }
+        await whatsAppMessageService.SendAsync(tenantProvider.CurrentBusinessId, customerId, content, cancellationToken);
     }
 }

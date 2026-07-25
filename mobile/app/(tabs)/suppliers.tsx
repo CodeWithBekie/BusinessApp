@@ -7,6 +7,7 @@ import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { formatMoney } from '@/src/common/format';
 import { formatRelativeDate } from '@/src/orders/orderStatus';
+import { useCachedFetch } from '@/src/offline/useCachedFetch';
 
 type Section = 'suppliers' | 'purchaseOrders';
 type PoFilterValue = PurchaseOrderStatus | 'All';
@@ -77,48 +78,36 @@ function PurchaseOrderCard({ po, onPress }: { po: PurchaseOrderSummary; onPress:
 export default function SuppliersScreen() {
   const router = useRouter();
   const [section, setSection] = useState<Section>('suppliers');
-
-  const [suppliers, setSuppliers] = useState<Supplier[] | null>(null);
-  const [supplierError, setSupplierError] = useState<string | null>(null);
-
   const [poFilter, setPoFilter] = useState<PoFilterValue>('All');
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderSummary[] | null>(null);
-  const [poError, setPoError] = useState<string | null>(null);
 
-  const [refreshing, setRefreshing] = useState(false);
+  const fetchSuppliers = useCallback(() => apiClient.getSuppliers(), []);
+  const {
+    data: suppliers,
+    error: supplierError,
+    refreshing: suppliersRefreshing,
+    isFromCache: suppliersFromCache,
+    reload: loadSuppliers,
+  } = useCachedFetch<Supplier[]>('suppliers', fetchSuppliers);
 
-  const loadSuppliers = useCallback((isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    apiClient
-      .getSuppliers()
-      .then((data) => {
-        setSuppliers(data);
-        setSupplierError(null);
-      })
-      .catch((err: Error) => setSupplierError(err.message))
-      .finally(() => setRefreshing(false));
-  }, []);
+  const fetchPurchaseOrders = useCallback(() => apiClient.getPurchaseOrders(poFilter === 'All' ? undefined : poFilter), [poFilter]);
+  const {
+    data: purchaseOrders,
+    error: poError,
+    refreshing: poRefreshing,
+    isFromCache: poFromCache,
+    reload: loadPurchaseOrders,
+  } = useCachedFetch<PurchaseOrderSummary[]>(`purchaseOrders:${poFilter}`, fetchPurchaseOrders);
 
-  const loadPurchaseOrders = useCallback((filter: PoFilterValue, isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    apiClient
-      .getPurchaseOrders(filter === 'All' ? undefined : filter)
-      .then((data) => {
-        setPurchaseOrders(data);
-        setPoError(null);
-      })
-      .catch((err: Error) => setPoError(err.message))
-      .finally(() => setRefreshing(false));
-  }, []);
+  const refreshing = section === 'suppliers' ? suppliersRefreshing : poRefreshing;
 
   useFocusEffect(
     useCallback(() => {
       if (section === 'suppliers') {
         loadSuppliers();
       } else {
-        loadPurchaseOrders(poFilter);
+        loadPurchaseOrders();
       }
-    }, [section, poFilter, loadSuppliers, loadPurchaseOrders])
+    }, [section, loadSuppliers, loadPurchaseOrders])
   );
 
   return (
@@ -155,6 +144,7 @@ export default function SuppliersScreen() {
       {section === 'suppliers' ? (
         <>
           {supplierError && <Text style={styles.error}>Could not reach the API: {supplierError}</Text>}
+          {suppliersFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
           {!supplierError && suppliers === null && <ActivityIndicator style={styles.loading} />}
           {!supplierError && suppliers !== null && suppliers.length === 0 && <Text style={styles.empty}>No suppliers yet.</Text>}
           {!supplierError && suppliers !== null && suppliers.length > 0 && (
@@ -172,6 +162,7 @@ export default function SuppliersScreen() {
       ) : (
         <>
           {poError && <Text style={styles.error}>Could not reach the API: {poError}</Text>}
+          {poFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
           {!poError && purchaseOrders === null && <ActivityIndicator style={styles.loading} />}
           {!poError && purchaseOrders !== null && purchaseOrders.length === 0 && <Text style={styles.empty}>No purchase orders yet.</Text>}
           {!poError && purchaseOrders !== null && purchaseOrders.length > 0 && (
@@ -182,7 +173,7 @@ export default function SuppliersScreen() {
               renderItem={({ item }) => (
                 <PurchaseOrderCard po={item} onPress={() => router.push({ pathname: '/purchase-order/[id]', params: { id: item.id } })} />
               )}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadPurchaseOrders(poFilter, true)} />}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadPurchaseOrders(true)} />}
             />
           )}
         </>
@@ -212,6 +203,7 @@ const styles = StyleSheet.create({
   loading: { marginTop: 24 },
   empty: { opacity: 0.6, marginTop: 8 },
   error: { color: '#c0392b', marginBottom: 12 },
+  cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
   list: { width: '100%' },
   card: { marginBottom: 12, borderRadius: 10 },
   cardPressed: { opacity: 0.7 },

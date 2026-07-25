@@ -77,10 +77,12 @@ builder.Services.AddScoped<HttpBusinessIdTenantProvider>();
 builder.Services.AddScoped<ICurrentTenantProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
 builder.Services.AddScoped<ICurrentTenantSetter>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
 builder.Services.AddScoped<ICurrentUserProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
+builder.Services.AddScoped<ICurrentCustomerProvider, HttpCustomerAccountProvider>();
 
 // Section 15 — JWT auth. PasswordHasher<BusinessUser> + a hand-issued JWT satisfy "ASP.NET Core
 // Identity or an equivalent" without adopting full Identity's UserManager/table scaffolding.
 builder.Services.AddSingleton<IPasswordHasher<BusinessUser>, PasswordHasher<BusinessUser>>();
+builder.Services.AddSingleton<IPasswordHasher<CustomerAccount>, PasswordHasher<CustomerAccount>>();
 builder.Services.AddPlatformJwtAuthentication(builder.Configuration);
 
 // Section 10.3/10.7 tool contracts — same registrations the Mcp project's host uses, so both
@@ -96,6 +98,7 @@ builder.Services.AddScoped<IInsightsTools, InsightsTools>();
 builder.Services.AddScoped<ICustomerTools, CustomerTools>();
 builder.Services.AddScoped<ISupplierTools, SupplierTools>();
 builder.Services.AddScoped<IPurchaseOrderTools, PurchaseOrderTools>();
+builder.Services.AddScoped<IMarketplaceTools, MarketplaceTools>();
 builder.Services.AddScoped<IDocumentGenerationTools, DocumentGenerationTools>();
 builder.Services.AddScoped<IMessagingTools, MessagingTools>();
 
@@ -139,6 +142,7 @@ builder.Services.AddHttpClient<IWhatsAppSender, WhatsAppGraphClient>(client =>
 {
     client.BaseAddress = new Uri("https://graph.facebook.com/");
 }).AddStandardResilienceHandler();
+builder.Services.AddScoped<IWhatsAppMessageService, WhatsAppMessageService>();
 
 // Section 13.2 — real outbound Paynow Express Checkout calls. No BaseAddress here since
 // PaynowClient builds full URLs itself from PaynowOptions.BaseUrl (matches the WhatsApp client's
@@ -148,6 +152,7 @@ builder.Services.AddHttpClient<IPaynowClient, PaynowClient>().AddStandardResilie
 
 builder.Services.AddHostedService<WhatsAppOrchestratorConsumer>();
 builder.Services.AddHostedService<PaymentWebhookConsumer>();
+builder.Services.AddHostedService<WhatsAppRetryHostedService>();
 
 // Dev-only permissive CORS so the Expo web preview (a different origin/port) can call this Api.
 // Native (iOS/Android) builds aren't subject to CORS, so this only matters for the web target.
@@ -175,8 +180,10 @@ app.UseAuthorization();
 app.MapHealthChecks("/health");
 
 app.MapAuthEndpoints();
+app.MapCustomerAuthEndpoints();
 app.MapWebhookEndpoints();
 app.MapDashboardEndpoints();
+app.MapMarketplaceEndpoints();
 app.MapAssistantEndpoints();
 
 app.Run();

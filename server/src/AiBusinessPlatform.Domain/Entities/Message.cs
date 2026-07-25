@@ -9,4 +9,12 @@ public class Message : ITenantScoped
     public string Content { get; set; } = string.Empty;
     public string? WhatsAppMessageId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+
+    // Delivery/retry tracking — only meaningful for Direction == Outbound (see MessageDeliveryStatus).
+    public MessageDeliveryStatus Status { get; set; } = MessageDeliveryStatus.Pending;
+    public int AttemptCount { get; set; }
+    public DateTimeOffset? NextAttemptAt { get; set; }
+    public string? LastError { get; set; }
+    public DateTimeOffset? DeliveredAt { get; set; }
+    public DateTimeOffset? ReadAt { get; set; }
 }

@@ -7,6 +7,8 @@ import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { downloadAndShareDocument } from '@/src/documents/downloadAndShare';
 import { formatMoney, ORDER_STATUS_COLORS } from '@/src/orders/orderStatus';
+import { useCachedFetch } from '@/src/offline/useCachedFetch';
+import { useIsOnline } from '@/src/offline/networkStatus';
 
 const PAYMENT_STATUS_COLORS: Record<string, string> = {
   Pending: '#f2994a',
@@ -58,9 +60,10 @@ export default function OrderDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const colorScheme = useColorScheme();
+  const isOnline = useIsOnline();
   const metaStyle = colorScheme === 'dark' ? styles.metaDark : styles.metaLight;
-  const [order, setOrder] = useState<OrderDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const fetchOrder = useCallback(() => apiClient.getOrder(id!), [id]);
+  const { data: order, error, isFromCache, reload: load } = useCachedFetch<OrderDetail>(`order:${id}`, fetchOrder);
   const [fulfilling, setFulfilling] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -78,20 +81,9 @@ export default function OrderDetailScreen() {
   const [editProvider, setEditProvider] = useState<OrderPayment['provider']>('Cash');
   const [updatingProvider, setUpdatingProvider] = useState(false);
 
-  const load = useCallback(() => {
-    if (!id) return;
-    apiClient
-      .getOrder(id)
-      .then((data) => {
-        setOrder(data);
-        setError(null);
-      })
-      .catch((err: Error) => setError(err.message));
-  }, [id]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (id) load();
+  }, [id, load]);
 
   const performFulfill = useCallback(async () => {
     if (!order) return;
@@ -197,6 +189,7 @@ export default function OrderDetailScreen() {
     <View style={styles.container}>
       <Stack.Screen options={{ title: order ? `Order #${order.id.slice(0, 8)}` : 'Order' }} />
       {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
+      {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
       {!error && order === null && <ActivityIndicator style={styles.loading} />}
       {!error && order !== null && (
         <>
@@ -240,8 +233,8 @@ export default function OrderDetailScreen() {
               )}
 
               {hasConfirmedPayment && !locked && !showEditProvider && (
-                <Pressable style={styles.inlineEditButton} onPress={startEditProvider}>
-                  <Text style={styles.inlineEditButtonText}>Edit provider</Text>
+                <Pressable style={styles.inlineEditButton} onPress={startEditProvider} disabled={!isOnline}>
+                  <Text style={[styles.inlineEditButtonText, !isOnline && styles.buttonDisabled]}>Edit provider</Text>
                 </Pressable>
               )}
 
@@ -253,8 +246,8 @@ export default function OrderDetailScreen() {
                       <Text style={styles.modalCancelText}>Cancel</Text>
                     </Pressable>
                     <Pressable
-                      style={[styles.button, styles.inlineFormConfirmButton, updatingProvider && styles.buttonDisabled]}
-                      disabled={updatingProvider}
+                      style={[styles.button, styles.inlineFormConfirmButton, (updatingProvider || !isOnline) && styles.buttonDisabled]}
+                      disabled={updatingProvider || !isOnline}
                       onPress={submitEditProvider}
                     >
                       <Text style={styles.buttonText}>{updatingProvider ? 'Saving…' : 'Save'}</Text>
@@ -269,8 +262,8 @@ export default function OrderDetailScreen() {
             <Section title="Payment">
               {!order.payment && <Text style={[styles.rowSecondary, metaStyle]}>No payment recorded yet.</Text>}
               {!showRecordPayment && (
-                <Pressable style={styles.inlineEditButton} onPress={startRecordPayment}>
-                  <Text style={styles.inlineEditButtonText}>Record payment</Text>
+                <Pressable style={styles.inlineEditButton} onPress={startRecordPayment} disabled={!isOnline}>
+                  <Text style={[styles.inlineEditButtonText, !isOnline && styles.buttonDisabled]}>Record payment</Text>
                 </Pressable>
               )}
               {showRecordPayment && (
@@ -296,8 +289,8 @@ export default function OrderDetailScreen() {
                       <Text style={styles.modalCancelText}>Cancel</Text>
                     </Pressable>
                     <Pressable
-                      style={[styles.button, styles.inlineFormConfirmButton, recordingPayment && styles.buttonDisabled]}
-                      disabled={recordingPayment}
+                      style={[styles.button, styles.inlineFormConfirmButton, (recordingPayment || !isOnline) && styles.buttonDisabled]}
+                      disabled={recordingPayment || !isOnline}
                       onPress={submitRecordPayment}
                     >
                       <Text style={styles.buttonText}>{recordingPayment ? 'Recording…' : 'Confirm payment'}</Text>
@@ -323,10 +316,15 @@ export default function OrderDetailScreen() {
           )}
 
           {order.status === 'Quoted' && (
-            <Pressable style={[styles.button, invoicing && styles.buttonDisabled]} disabled={invoicing} onPress={performSendInvoice}>
+            <Pressable
+              style={[styles.button, (invoicing || !isOnline) && styles.buttonDisabled]}
+              disabled={invoicing || !isOnline}
+              onPress={performSendInvoice}
+            >
               <Text style={styles.buttonText}>{invoicing ? 'Sending invoice…' : 'Send invoice'}</Text>
             </Pressable>
           )}
+          {!isOnline && <Text style={styles.offlineNotice}>You're offline — some actions are disabled.</Text>}
 
           <Pressable
             style={styles.secondaryButton}
@@ -339,8 +337,8 @@ export default function OrderDetailScreen() {
 
           {order.status === 'Paid' && (
             <Pressable
-              style={[styles.button, fulfilling && styles.buttonDisabled]}
-              disabled={fulfilling}
+              style={[styles.button, (fulfilling || !isOnline) && styles.buttonDisabled]}
+              disabled={fulfilling || !isOnline}
               onPress={() => setConfirmVisible(true)}
             >
               <Text style={styles.buttonText}>{fulfilling ? 'Marking fulfilled…' : 'Mark as fulfilled'}</Text>
@@ -373,6 +371,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 32 },
   loading: { marginTop: 40 },
   error: { color: '#c0392b', marginBottom: 12 },
+  cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
+  offlineNotice: { color: '#c0392b', fontSize: 12, marginBottom: 12 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   updatedAt: { fontSize: 12 },
   total: { fontSize: 30, fontWeight: '700', marginBottom: 20 },

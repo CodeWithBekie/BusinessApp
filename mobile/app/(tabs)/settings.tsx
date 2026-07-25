@@ -1,16 +1,18 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, TextInput } from 'react-native';
 
 import { apiClient } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAuth } from '@/src/auth/AuthContext';
+import { useIsOnline } from '@/src/offline/networkStatus';
 
 // Section 12.3/19 — stand-in for Meta's real embedded-signup/OAuth flow: the owner pastes in
 // values obtained directly from their Meta dashboard. See WhatsAppOptions/WhatsAppConnectRequest
 // on the Api side.
 function WhatsAppConnectForm() {
   const inputStyle = useInputStyle();
+  const isOnline = useIsOnline();
   const [wabaId, setWabaId] = useState('');
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [systemUserToken, setSystemUserToken] = useState('');
@@ -55,10 +57,11 @@ function WhatsAppConnectForm() {
         autoCapitalize="none"
         secureTextEntry
       />
-      <Pressable style={styles.button} disabled={status === 'saving'} onPress={submit}>
+      <Pressable style={[styles.button, !isOnline && styles.buttonDisabled]} disabled={status === 'saving' || !isOnline} onPress={submit}>
         <Text style={styles.buttonText}>{status === 'saving' ? 'Connecting…' : 'Connect'}</Text>
       </Pressable>
       {message && <Text style={status === 'error' ? styles.error : styles.success}>{message}</Text>}
+      {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
     </View>
   );
 }
@@ -67,6 +70,7 @@ function WhatsAppConnectForm() {
 // (EcoCash/Bank) payments. See PaynowConnectRequest on the Api side.
 function PaynowConnectForm() {
   const inputStyle = useInputStyle();
+  const isOnline = useIsOnline();
   const [integrationId, setIntegrationId] = useState('');
   const [integrationKey, setIntegrationKey] = useState('');
   const [notificationEmail, setNotificationEmail] = useState('');
@@ -112,10 +116,11 @@ function PaynowConnectForm() {
         autoCapitalize="none"
         keyboardType="email-address"
       />
-      <Pressable style={styles.button} disabled={status === 'saving'} onPress={submit}>
+      <Pressable style={[styles.button, !isOnline && styles.buttonDisabled]} disabled={status === 'saving' || !isOnline} onPress={submit}>
         <Text style={styles.buttonText}>{status === 'saving' ? 'Connecting…' : 'Connect'}</Text>
       </Pressable>
       {message && <Text style={status === 'error' ? styles.error : styles.success}>{message}</Text>}
+      {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
     </View>
   );
 }
@@ -123,6 +128,7 @@ function PaynowConnectForm() {
 // Section 10.6/12.3 — document upload for RAG. Plain-text body only this pass (matches the Api).
 function DocumentUploadForm() {
   const inputStyle = useInputStyle();
+  const isOnline = useIsOnline();
   const [title, setTitle] = useState('');
   const [sourceType, setSourceType] = useState('text');
   const [content, setContent] = useState('');
@@ -163,10 +169,48 @@ function DocumentUploadForm() {
         multiline
         numberOfLines={6}
       />
-      <Pressable style={styles.button} disabled={status === 'saving'} onPress={submit}>
+      <Pressable style={[styles.button, !isOnline && styles.buttonDisabled]} disabled={status === 'saving' || !isOnline} onPress={submit}>
         <Text style={styles.buttonText}>{status === 'saving' ? 'Uploading…' : 'Upload'}</Text>
       </Pressable>
       {message && <Text style={status === 'error' ? styles.error : styles.success}>{message}</Text>}
+      {!isOnline && <Text style={styles.error}>You're offline — connect to upload.</Text>}
+    </View>
+  );
+}
+
+// Opt-in toggle for the customer marketplace directory — businesses stay hidden by default
+// (see Business.IsPubliclyListed on the Api side) until an owner explicitly lists themselves.
+// No GET endpoint exists for the current value yet, so this starts optimistically at "off" and
+// reflects whatever the PATCH response confirms — simplest for this first pass (per the plan).
+function BusinessVisibilityForm() {
+  const isOnline = useIsOnline();
+  const [isPubliclyListed, setIsPubliclyListed] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggle = async (value: boolean) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await apiClient.setBusinessVisibility(value);
+      setIsPubliclyListed(result.isPubliclyListed);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+      <Text style={styles.cardTitle}>Customer marketplace</Text>
+      <Text style={styles.cardSubtitle}>List your business so customers can browse and order from you in the app.</Text>
+      <View style={styles.toggleRow} lightColor="transparent" darkColor="transparent">
+        <Text style={styles.toggleLabel}>{isPubliclyListed ? 'Listed' : 'Not listed'}</Text>
+        <Switch value={isPubliclyListed} onValueChange={toggle} disabled={saving || !isOnline} />
+      </View>
+      {error && <Text style={styles.error}>{error}</Text>}
+      {!isOnline && <Text style={styles.error}>You're offline — connect to change this.</Text>}
     </View>
   );
 }
@@ -183,6 +227,7 @@ export default function SettingsScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Settings</Text>
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
+      <BusinessVisibilityForm />
       <WhatsAppConnectForm />
       <PaynowConnectForm />
       <DocumentUploadForm />
@@ -212,7 +257,10 @@ const styles = StyleSheet.create({
   inputLight: { color: '#000' },
   inputDark: { color: '#fff' },
   textArea: { minHeight: 100, textAlignVertical: 'top' },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  toggleLabel: { fontSize: 14, fontWeight: '600' },
   button: { backgroundColor: '#007aff', paddingVertical: 10, borderRadius: 6, alignItems: 'center' },
+  buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#fff', fontWeight: '600' },
   error: { color: '#c0392b', marginTop: 8 },
   success: { color: '#2e7d32', marginTop: 8 },

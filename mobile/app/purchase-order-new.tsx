@@ -5,6 +5,7 @@ import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, TextInp
 import { apiClient, CatalogItem, CatalogItemType, PurchaseOrderDetail, PurchaseOrderLineItem, Supplier } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { formatMoney } from '@/src/common/format';
+import { useIsOnline } from '@/src/offline/networkStatus';
 
 const ITEM_TYPES: CatalogItemType[] = ['Stock', 'TimeBased', 'Quote'];
 
@@ -117,6 +118,7 @@ function CartRow({
 export default function PurchaseOrderNewScreen() {
   const router = useRouter();
   const inputStyle = useInputStyle();
+  const isOnline = useIsOnline();
 
   const [suppliers, setSuppliers] = useState<Supplier[] | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
@@ -414,10 +416,11 @@ export default function PurchaseOrderNewScreen() {
                 )}
 
                 {saveError && <Text style={styles.error}>{saveError}</Text>}
+                {!isOnline && <Text style={styles.error}>You're offline — connect to create this purchase order.</Text>}
 
                 <Pressable
-                  style={[styles.button, (saving || cartLines.length === 0 || !selectedSupplier) && styles.buttonDisabled]}
-                  disabled={saving || cartLines.length === 0 || !selectedSupplier}
+                  style={[styles.button, (saving || cartLines.length === 0 || !selectedSupplier || !isOnline) && styles.buttonDisabled]}
+                  disabled={saving || cartLines.length === 0 || !selectedSupplier || !isOnline}
                   onPress={createPurchaseOrder}
                 >
                   <Text style={styles.buttonText}>{saving ? 'Creating…' : 'Create purchase order'}</Text>

@@ -1,11 +1,13 @@
+import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, TextInput } from 'react-native';
 
 import { apiClient, CatalogItem, CatalogItemType } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { CATALOG_ITEM_TYPE_LABELS, CATALOG_ITEM_TYPES } from '@/src/catalog/catalogItemType';
+import { useIsOnline } from '@/src/offline/networkStatus';
 
 function useInputStyle() {
   const colorScheme = useColorScheme();
@@ -16,6 +18,7 @@ export default function CatalogItemScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const inputStyle = useInputStyle();
+  const isOnline = useIsOnline();
   const isNew = id === 'new';
 
   const [loading, setLoading] = useState(!isNew);
@@ -32,6 +35,8 @@ export default function CatalogItemScreen() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [togglingActive, setTogglingActive] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isNew) return;
@@ -117,6 +122,53 @@ export default function CatalogItemScreen() {
     }
   }, [existing]);
 
+  const pickImage = useCallback(
+    async (source: 'library' | 'camera') => {
+      if (!existing) return;
+      const permission =
+        source === 'library'
+          ? await ImagePicker.requestMediaLibraryPermissionsAsync()
+          : await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        setImageError('Permission was not granted.');
+        return;
+      }
+
+      const result =
+        source === 'library'
+          ? await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.7 })
+          : await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.7 });
+      if (result.canceled || !result.assets[0]) return;
+
+      const asset = result.assets[0];
+      setImageError(null);
+      setImageUploading(true);
+      try {
+        const updated = await apiClient.uploadCatalogItemImage(existing.id, asset.uri, asset.mimeType ?? 'image/jpeg');
+        setExisting(updated);
+      } catch (err) {
+        setImageError((err as Error).message);
+      } finally {
+        setImageUploading(false);
+      }
+    },
+    [existing]
+  );
+
+  const removeImage = useCallback(async () => {
+    if (!existing) return;
+    setImageError(null);
+    setImageUploading(true);
+    try {
+      const updated = await apiClient.removeCatalogItemImage(existing.id);
+      setExisting(updated);
+    } catch (err) {
+      setImageError((err as Error).message);
+    } finally {
+      setImageUploading(false);
+    }
+  }, [existing]);
+
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ title: isNew ? 'Add catalog item' : 'Edit catalog item' }} />
@@ -124,6 +176,44 @@ export default function CatalogItemScreen() {
       {loadError && <Text style={styles.error}>{loadError}</Text>}
       {!loading && !loadError && (
         <>
+          {!isNew && existing && (
+            <>
+              <Text style={styles.label}>Photo</Text>
+              <View style={styles.photoRow} lightColor="transparent" darkColor="transparent">
+                {existing.hasImage ? (
+                  <Image source={{ uri: apiClient.getCatalogItemImageUrl(existing.id, existing.updatedAt) }} style={styles.photoPreview} />
+                ) : (
+                  <View style={styles.photoPlaceholder}>
+                    <Text style={styles.photoPlaceholderText}>No photo</Text>
+                  </View>
+                )}
+                <View style={styles.photoActions} lightColor="transparent" darkColor="transparent">
+                  <Pressable
+                    style={[styles.photoButton, (imageUploading || !isOnline) && styles.buttonDisabled]}
+                    disabled={imageUploading || !isOnline}
+                    onPress={() => pickImage('library')}
+                  >
+                    <Text style={styles.photoButtonText}>{imageUploading ? 'Uploading…' : 'Choose photo'}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.photoButton, (imageUploading || !isOnline) && styles.buttonDisabled]}
+                    disabled={imageUploading || !isOnline}
+                    onPress={() => pickImage('camera')}
+                  >
+                    <Text style={styles.photoButtonText}>Take photo</Text>
+                  </Pressable>
+                  {existing.hasImage && (
+                    <Pressable disabled={imageUploading || !isOnline} onPress={removeImage}>
+                      <Text style={[styles.removePhotoText, (imageUploading || !isOnline) && styles.buttonDisabled]}>Remove photo</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+              {imageError && <Text style={styles.error}>{imageError}</Text>}
+              {!isOnline && <Text style={styles.hint}>You're offline — connect to change the photo.</Text>}
+            </>
+          )}
+
           <Text style={styles.label}>Name</Text>
           <TextInput style={inputStyle} placeholder="e.g. Premium Widget" value={name} onChangeText={setName} />
 
@@ -162,15 +252,16 @@ export default function CatalogItemScreen() {
           )}
 
           {saveError && <Text style={styles.error}>{saveError}</Text>}
+          {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
 
-          <Pressable style={[styles.button, saving && styles.buttonDisabled]} disabled={saving} onPress={save}>
+          <Pressable style={[styles.button, (saving || !isOnline) && styles.buttonDisabled]} disabled={saving || !isOnline} onPress={save}>
             <Text style={styles.buttonText}>{saving ? 'Saving…' : isNew ? 'Add item' : 'Save changes'}</Text>
           </Pressable>
 
           {!isNew && existing && (
             <Pressable
-              style={[styles.secondaryButton, existing.active ? styles.deactivateButton : styles.reactivateButton]}
-              disabled={togglingActive}
+              style={[styles.secondaryButton, existing.active ? styles.deactivateButton : styles.reactivateButton, !isOnline && styles.buttonDisabled]}
+              disabled={togglingActive || !isOnline}
               onPress={toggleActive}
             >
               <Text style={[styles.secondaryButtonText, existing.active ? styles.deactivateText : styles.reactivateText]}>
@@ -190,6 +281,22 @@ const styles = StyleSheet.create({
   error: { color: '#c0392b', marginTop: 8, marginBottom: 8 },
   label: { fontSize: 13, fontWeight: '600', opacity: 0.7, marginTop: 14, marginBottom: 6 },
   hint: { fontSize: 12, opacity: 0.5, marginTop: -2, marginBottom: 4 },
+  photoRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  photoPreview: { width: 72, height: 72, borderRadius: 10 },
+  photoPlaceholder: {
+    width: 72,
+    height: 72,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoPlaceholderText: { fontSize: 11, opacity: 0.5, textAlign: 'center' },
+  photoActions: { gap: 6 },
+  photoButton: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: '#007aff', alignSelf: 'flex-start' },
+  photoButtonText: { color: '#007aff', fontWeight: '600', fontSize: 13 },
+  removePhotoText: { color: '#c0392b', fontWeight: '600', fontSize: 12 },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',

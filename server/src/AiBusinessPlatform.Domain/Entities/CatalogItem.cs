@@ -11,6 +11,8 @@ public class CatalogItem : ITenantScoped
     public int? StockQuantity { get; set; }
     public string Unit { get; set; } = "each";
     public bool Active { get; set; } = true;
+    public byte[]? ImageData { get; set; }
+    public string? ImageContentType { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

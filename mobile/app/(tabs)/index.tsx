@@ -1,11 +1,12 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
 import { apiClient, CatalogItem } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { CATALOG_ITEM_TYPE_COLORS, CATALOG_ITEM_TYPE_LABELS, formatMoney } from '@/src/catalog/catalogItemType';
+import { useCachedFetch } from '@/src/offline/useCachedFetch';
 
 type FilterValue = 'All' | 'Active' | 'Inactive';
 
@@ -19,25 +20,46 @@ function TypeBadge({ item }: { item: CatalogItem }) {
   );
 }
 
+function CatalogThumbnail({ item }: { item: CatalogItem }) {
+  const [failed, setFailed] = useState(false);
+  if (item.hasImage && !failed) {
+    return (
+      <Image
+        source={{ uri: apiClient.getCatalogItemImageUrl(item.id, item.updatedAt) }}
+        style={styles.thumbnail}
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <View style={[styles.thumbnail, styles.thumbnailPlaceholder, { backgroundColor: CATALOG_ITEM_TYPE_COLORS[item.itemType] }]}>
+      <Text style={styles.thumbnailPlaceholderText}>{item.name.charAt(0).toUpperCase()}</Text>
+    </View>
+  );
+}
+
 function CatalogCard({ item, onPress }: { item: CatalogItem; onPress: () => void }) {
   const colorScheme = useColorScheme();
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
       <View style={[styles.cardInner, !item.active && styles.cardInactive]} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
-        <View style={styles.cardTopRow} lightColor="transparent" darkColor="transparent">
-          <Text style={styles.itemName} numberOfLines={1}>
-            {item.name}
-          </Text>
-          <TypeBadge item={item} />
-        </View>
-        <View style={styles.cardBottomRow} lightColor="transparent" darkColor="transparent">
-          <Text style={styles.price}>
-            {formatMoney(item.price, item.currency)} / {item.unit}
-          </Text>
-          <Text style={[styles.meta, colorScheme === 'dark' ? styles.metaDark : styles.metaLight]}>
-            {item.itemType === 'Stock' ? `${item.stockQuantity ?? 0} in stock` : 'No stock tracking'}
-            {!item.active ? ' · Inactive' : ''}
-          </Text>
+        <CatalogThumbnail item={item} />
+        <View style={styles.cardContent} lightColor="transparent" darkColor="transparent">
+          <View style={styles.cardTopRow} lightColor="transparent" darkColor="transparent">
+            <Text style={styles.itemName} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <TypeBadge item={item} />
+          </View>
+          <View style={styles.cardBottomRow} lightColor="transparent" darkColor="transparent">
+            <Text style={styles.price}>
+              {formatMoney(item.price, item.currency)} / {item.unit}
+            </Text>
+            <Text style={[styles.meta, colorScheme === 'dark' ? styles.metaDark : styles.metaLight]}>
+              {item.itemType === 'Stock' ? `${item.stockQuantity ?? 0} in stock` : 'No stock tracking'}
+              {!item.active ? ' · Inactive' : ''}
+            </Text>
+          </View>
         </View>
       </View>
     </Pressable>
@@ -62,21 +84,8 @@ function FilterTabs({ value, onChange }: { value: FilterValue; onChange: (value:
 export default function CatalogScreen() {
   const router = useRouter();
   const [filter, setFilter] = useState<FilterValue>('Active');
-  const [items, setItems] = useState<CatalogItem[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const load = useCallback((isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    apiClient
-      .getCatalog()
-      .then((data) => {
-        setItems(data);
-        setError(null);
-      })
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setRefreshing(false));
-  }, []);
+  const fetchCatalog = useCallback(() => apiClient.getCatalog(), []);
+  const { data: items, error, refreshing, isFromCache, reload: load } = useCachedFetch<CatalogItem[]>('catalog', fetchCatalog);
 
   useFocusEffect(
     useCallback(() => {
@@ -104,6 +113,7 @@ export default function CatalogScreen() {
       <FilterTabs value={filter} onChange={setFilter} />
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
       {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
+      {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
       {!error && items === null && <ActivityIndicator style={styles.loading} />}
       {!error && items !== null && visibleItems.length === 0 && (
         <Text style={styles.empty}>No {filter === 'All' ? '' : filter.toLowerCase() + ' '}catalog items yet.</Text>
@@ -145,11 +155,16 @@ const styles = StyleSheet.create({
   loading: { marginTop: 24 },
   empty: { opacity: 0.6, marginTop: 8 },
   error: { color: '#c0392b', marginBottom: 12 },
+  cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
   list: { width: '100%' },
   card: { marginBottom: 12, borderRadius: 10 },
   cardPressed: { opacity: 0.7 },
-  cardInner: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 14 },
+  cardInner: { flexDirection: 'row', gap: 12, borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 14 },
   cardInactive: { opacity: 0.55 },
+  cardContent: { flex: 1 },
+  thumbnail: { width: 48, height: 48, borderRadius: 8 },
+  thumbnailPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  thumbnailPlaceholderText: { color: '#fff', fontSize: 18, fontWeight: '700' },
   cardTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   itemName: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
   cardBottomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 },

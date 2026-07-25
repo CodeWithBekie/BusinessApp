@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-nativ
 import { apiClient, Supplier } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
+import { useIsOnline } from '@/src/offline/networkStatus';
 
 function useInputStyle() {
   const colorScheme = useColorScheme();
@@ -15,6 +16,7 @@ export default function SupplierScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const inputStyle = useInputStyle();
+  const isOnline = useIsOnline();
   const isNew = id === 'new';
 
   const [loading, setLoading] = useState(!isNew);
@@ -116,15 +118,16 @@ export default function SupplierScreen() {
           <TextInput style={inputStyle} placeholder="Optional" value={notes} onChangeText={setNotes} />
 
           {saveError && <Text style={styles.error}>{saveError}</Text>}
+          {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
 
-          <Pressable style={[styles.button, saving && styles.buttonDisabled]} disabled={saving} onPress={save}>
+          <Pressable style={[styles.button, (saving || !isOnline) && styles.buttonDisabled]} disabled={saving || !isOnline} onPress={save}>
             <Text style={styles.buttonText}>{saving ? 'Saving…' : isNew ? 'Add supplier' : 'Save changes'}</Text>
           </Pressable>
 
           {!isNew && existing && (
             <Pressable
-              style={[styles.secondaryButton, existing.active ? styles.deactivateButton : styles.reactivateButton]}
-              disabled={togglingActive}
+              style={[styles.secondaryButton, existing.active ? styles.deactivateButton : styles.reactivateButton, !isOnline && styles.buttonDisabled]}
+              disabled={togglingActive || !isOnline}
               onPress={toggleActive}
             >
               <Text style={[styles.secondaryButtonText, existing.active ? styles.deactivateText : styles.reactivateText]}>

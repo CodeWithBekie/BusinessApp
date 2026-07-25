@@ -6,6 +6,7 @@ import { apiClient, OrderListItem, OrderStatus } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { formatMoney, formatRelativeDate, ORDER_STATUS_COLORS, ORDER_STATUS_FILTERS } from '@/src/orders/orderStatus';
+import { useCachedFetch } from '@/src/offline/useCachedFetch';
 
 type FilterValue = OrderStatus | 'All';
 
@@ -57,27 +58,13 @@ function FilterTabs({ value, onChange }: { value: FilterValue; onChange: (value:
 export default function OrdersScreen() {
   const router = useRouter();
   const [filter, setFilter] = useState<FilterValue>('All');
-  const [items, setItems] = useState<OrderListItem[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const load = useCallback((status: FilterValue, isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    apiClient
-      .getOrders(status === 'All' ? undefined : status)
-      .then((data) => {
-        setItems(data);
-        setError(null);
-      })
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setRefreshing(false));
-  }, []);
+  const fetchOrders = useCallback(() => apiClient.getOrders(filter === 'All' ? undefined : filter), [filter]);
+  const { data: items, error, refreshing, isFromCache, reload: load } = useCachedFetch<OrderListItem[]>(`orders:${filter}`, fetchOrders);
 
   useFocusEffect(
     useCallback(() => {
-      setItems(null);
-      load(filter);
-    }, [filter, load])
+      load();
+    }, [load])
   );
 
   return (
@@ -86,6 +73,7 @@ export default function OrdersScreen() {
       <FilterTabs value={filter} onChange={setFilter} />
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
       {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
+      {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
       {!error && items === null && <ActivityIndicator style={styles.loading} />}
       {!error && items !== null && items.length === 0 && (
         <Text style={styles.empty}>No {filter === 'All' ? '' : filter.toLowerCase() + ' '}orders yet.</Text>
@@ -98,7 +86,7 @@ export default function OrdersScreen() {
           renderItem={({ item }) => (
             <OrderCard order={item} onPress={() => router.push({ pathname: '/order/[id]', params: { id: item.id } })} />
           )}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(filter, true)} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
         />
       )}
     </View>
@@ -124,6 +112,7 @@ const styles = StyleSheet.create({
   loading: { marginTop: 24 },
   empty: { opacity: 0.6, marginTop: 8 },
   error: { color: '#c0392b', marginBottom: 12 },
+  cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
   list: { width: '100%' },
   card: { marginBottom: 12, borderRadius: 10 },
   cardPressed: { opacity: 0.7 },

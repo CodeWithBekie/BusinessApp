@@ -203,8 +203,15 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
             query = query.Where(c => c.Active);
         }
 
-        var items = await query.OrderBy(c => c.Name).ToListAsync(cancellationToken);
-        return items.Select(ToSummary).ToList();
+        // Projects directly to CatalogItemSummary (translated to a SQL column list by EF Core) so
+        // ImageData bytes are never fetched for a list of items — only a single-item image lookup
+        // (GetCatalogItemImageAsync) ever selects that column.
+        return await query
+            .OrderBy(c => c.Name)
+            .Select(c => new CatalogItemSummary(
+                c.Id, c.Name, c.ItemType, c.Price, c.Currency, c.StockQuantity, c.Unit, c.Active,
+                c.CreatedAt, c.UpdatedAt, c.ImageData != null))
+            .ToListAsync(cancellationToken);
     }
 
     public async Task<CatalogItemSummary> CreateCatalogItemAsync(
@@ -303,7 +310,59 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
         return ToSummary(item);
     }
 
+    public async Task<CatalogItemImage?> GetCatalogItemImageAsync(Guid businessId, Guid itemId, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+
+        var item = await dbContext.CatalogItems.AsNoTracking()
+            .Where(c => c.Id == itemId)
+            .Select(c => new { c.ImageData, c.ImageContentType })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return item?.ImageData is null ? null : new CatalogItemImage(item.ImageData, item.ImageContentType ?? "application/octet-stream");
+    }
+
+    public async Task<CatalogItemSummary> SetCatalogItemImageAsync(
+        Guid businessId, Guid itemId, byte[] imageData, string contentType, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+
+        var item = await dbContext.CatalogItems.FirstOrDefaultAsync(c => c.Id == itemId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Catalog item {itemId} not found.");
+
+        item.ImageData = imageData;
+        item.ImageContentType = contentType;
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ToSummary(item);
+    }
+
+    public async Task<CatalogItemSummary> RemoveCatalogItemImageAsync(Guid businessId, Guid itemId, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+
+        var item = await dbContext.CatalogItems.FirstOrDefaultAsync(c => c.Id == itemId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Catalog item {itemId} not found.");
+
+        item.ImageData = null;
+        item.ImageContentType = null;
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ToSummary(item);
+    }
+
     private static CatalogItemSummary ToSummary(CatalogItem item) => new(
         item.Id, item.Name, item.ItemType, item.Price, item.Currency,
-        item.StockQuantity, item.Unit, item.Active, item.CreatedAt, item.UpdatedAt);
+        item.StockQuantity, item.Unit, item.Active, item.CreatedAt, item.UpdatedAt, item.ImageData != null);
 }

@@ -1,15 +1,13 @@
 using System.Text.Json;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
-using AiBusinessPlatform.Domain;
-using AiBusinessPlatform.Domain.Entities;
 using AiBusinessPlatform.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace AiBusinessPlatform.Infrastructure.Tools;
 
 public class MessagingTools(
-    AiBusinessPlatformDbContext dbContext, ICurrentTenantProvider tenantProvider, IApprovalTools approvalTools, IWhatsAppSender whatsAppSender)
+    AiBusinessPlatformDbContext dbContext, ICurrentTenantProvider tenantProvider, IApprovalTools approvalTools, IWhatsAppMessageService whatsAppMessageService)
     : IMessagingTools
 {
     public async Task<Guid> RequestSendCustomerMessageApprovalAsync(Guid businessId, Guid customerId, string draftedText, CancellationToken cancellationToken = default)
@@ -34,9 +32,10 @@ public class MessagingTools(
         return result.PendingApprovalId;
     }
 
-    // Mirrors WhatsAppOrchestratorConsumer.TrySendRealWhatsAppMessageAsync's connection-resolution +
-    // send pattern (duplicated by necessity — that method is private to a different project) and
-    // OrderTools.SendCustomerMessageAsync's outbound-Message persistence pattern.
+    // Delegates to IWhatsAppMessageService (the one shared place every WhatsApp send goes
+    // through) — still synchronous/throws on failure here so the approval-decision caller sees it
+    // immediately, matching the existing UX; the difference is the failure is now also persisted
+    // with retry scheduling instead of just erroring out once.
     public async Task SendApprovedCustomerMessageAsync(Guid businessId, Guid customerId, string text, CancellationToken cancellationToken = default)
     {
         if (businessId != tenantProvider.CurrentBusinessId)
@@ -44,30 +43,10 @@ public class MessagingTools(
             throw new InvalidOperationException("businessId does not match the current tenant context.");
         }
 
-        var customer = await dbContext.Customers.FirstOrDefaultAsync(c => c.Id == customerId && c.BusinessId == businessId, cancellationToken)
-            ?? throw new InvalidOperationException($"Customer {customerId} not found.");
-
-        var connection = await dbContext.WhatsAppConnections
-            .FirstOrDefaultAsync(c => c.BusinessId == businessId && c.Status == WhatsAppConnectionStatus.Active, cancellationToken)
-            ?? throw new InvalidOperationException("This business has no connected WhatsApp number.");
-
-        await whatsAppSender.SendTextMessageAsync(connection.PhoneNumberId, connection.SystemUserToken, customer.WhatsAppNumber, text, cancellationToken);
-
-        var conversation = await dbContext.Conversations
-            .FirstOrDefaultAsync(c => c.CustomerId == customerId && c.Status == ConversationStatus.Open, cancellationToken);
-        if (conversation is not null)
+        var result = await whatsAppMessageService.SendAsync(businessId, customerId, text, cancellationToken);
+        if (!result.Success)
         {
-            dbContext.Messages.Add(new Message
-            {
-                Id = Guid.NewGuid(),
-                BusinessId = businessId,
-                ConversationId = conversation.Id,
-                Direction = MessageDirection.Outbound,
-                Content = text,
-                CreatedAt = DateTimeOffset.UtcNow
-            });
+            throw new InvalidOperationException(result.ErrorMessage ?? "Failed to send WhatsApp message.");
         }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
     }
 }

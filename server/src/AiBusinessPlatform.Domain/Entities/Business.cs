@@ -10,5 +10,6 @@ public class Business
     public string Timezone { get; set; } = "Africa/Harare";
     public BusinessStatus Status { get; set; } = BusinessStatus.Active;
     public Guid? ParentBusinessId { get; set; } // Section 14: multi-branch enterprise accounts
+    public bool IsPubliclyListed { get; set; } = false; // opt-in to the customer marketplace directory
     public DateTimeOffset CreatedAt { get; set; }
 }

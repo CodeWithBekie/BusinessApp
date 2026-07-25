@@ -57,6 +57,7 @@ builder.Services.AddHttpClient<IWhatsAppSender, WhatsAppGraphClient>(client =>
 {
     client.BaseAddress = new Uri("https://graph.facebook.com/");
 }).AddStandardResilienceHandler();
+builder.Services.AddScoped<IWhatsAppMessageService, WhatsAppMessageService>();
 builder.Services.AddScoped<IMessagingTools, MessagingTools>();
 
 // Section 10.7 — the same C# functions the in-app orchestrator/dashboard/Assistant call, exposed

@@ -7,6 +7,8 @@ import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { APPROVAL_STATUS_COLORS, APPROVAL_STATUS_FILTERS, ApprovalStatus } from '@/src/approvals/approvalStatus';
 import { formatRelativeDate } from '@/src/common/format';
+import { useCachedFetch } from '@/src/offline/useCachedFetch';
+import { useIsOnline } from '@/src/offline/networkStatus';
 
 type FilterValue = ApprovalStatus | 'All';
 type Decision = 'approve' | 'reject';
@@ -75,25 +77,13 @@ function FilterTabs({ value, onChange }: { value: FilterValue; onChange: (value:
 
 export default function ApprovalsScreen() {
   const colorScheme = useColorScheme();
+  const isOnline = useIsOnline();
   const [filter, setFilter] = useState<FilterValue>('Pending');
-  const [items, setItems] = useState<PendingApproval[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const fetchApprovals = useCallback(() => apiClient.getApprovals(), []);
+  const { data: items, error, refreshing, isFromCache, reload: load } = useCachedFetch<PendingApproval[]>('approvals', fetchApprovals);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{ item: PendingApproval; decision: Decision } | null>(null);
-
-  const load = useCallback((isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    apiClient
-      .getApprovals()
-      .then((data) => {
-        setItems(data);
-        setError(null);
-      })
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setRefreshing(false));
-  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -131,6 +121,7 @@ export default function ApprovalsScreen() {
 
       {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
       {actionError && <Text style={styles.error}>{actionError}</Text>}
+      {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
       {!error && items === null && <ActivityIndicator style={styles.loading} />}
       {!error && items !== null && visibleItems.length === 0 && (
         <Text style={styles.empty}>No {filter === 'All' ? '' : filter.toLowerCase() + ' '}approvals.</Text>
@@ -150,22 +141,25 @@ export default function ApprovalsScreen() {
                 {item.decidedAt ? ` · Decided ${formatRelativeDate(item.decidedAt)}` : ''}
               </Text>
               {item.status === 'Pending' && (
-                <View style={styles.actions} lightColor="transparent" darkColor="transparent">
-                  <Pressable
-                    style={[styles.button, styles.approveButton]}
-                    disabled={pendingActionId === item.id}
-                    onPress={() => setConfirmTarget({ item, decision: 'approve' })}
-                  >
-                    <Text style={styles.buttonText}>{pendingActionId === item.id ? '…' : 'Approve'}</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.button, styles.rejectButton]}
-                    disabled={pendingActionId === item.id}
-                    onPress={() => setConfirmTarget({ item, decision: 'reject' })}
-                  >
-                    <Text style={styles.buttonText}>{pendingActionId === item.id ? '…' : 'Reject'}</Text>
-                  </Pressable>
-                </View>
+                <>
+                  <View style={styles.actions} lightColor="transparent" darkColor="transparent">
+                    <Pressable
+                      style={[styles.button, styles.approveButton, !isOnline && styles.buttonDisabled]}
+                      disabled={pendingActionId === item.id || !isOnline}
+                      onPress={() => setConfirmTarget({ item, decision: 'approve' })}
+                    >
+                      <Text style={styles.buttonText}>{pendingActionId === item.id ? '…' : 'Approve'}</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.button, styles.rejectButton, !isOnline && styles.buttonDisabled]}
+                      disabled={pendingActionId === item.id || !isOnline}
+                      onPress={() => setConfirmTarget({ item, decision: 'reject' })}
+                    >
+                      <Text style={styles.buttonText}>{pendingActionId === item.id ? '…' : 'Reject'}</Text>
+                    </Pressable>
+                  </View>
+                  {!isOnline && <Text style={styles.offlineNotice}>You're offline — connect to decide.</Text>}
+                </>
               )}
             </View>
           );
@@ -216,6 +210,7 @@ const styles = StyleSheet.create({
   loading: { marginTop: 24 },
   empty: { opacity: 0.6, marginTop: 8 },
   error: { color: '#c0392b', marginBottom: 12 },
+  cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
   card: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 14, marginBottom: 12 },
   cardTopRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
   cardTitle: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
@@ -224,9 +219,11 @@ const styles = StyleSheet.create({
   metaDark: { color: '#aaa' },
   actions: { flexDirection: 'row', gap: 12, marginTop: 12 },
   button: { flex: 1, paddingVertical: 10, borderRadius: 6, alignItems: 'center' },
+  buttonDisabled: { opacity: 0.6 },
   approveButton: { backgroundColor: '#2e7d32' },
   rejectButton: { backgroundColor: '#c0392b' },
   buttonText: { color: '#fff', fontWeight: '600' },
+  offlineNotice: { color: '#c0392b', fontSize: 12, marginTop: 8 },
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },

@@ -7,6 +7,8 @@ import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { formatMoney } from '@/src/common/format';
 import { downloadAndShareDocument } from '@/src/documents/downloadAndShare';
+import { useCachedFetch } from '@/src/offline/useCachedFetch';
+import { useIsOnline } from '@/src/offline/networkStatus';
 
 const PO_STATUS_COLORS: Record<string, string> = {
   Draft: '#8e8e93',
@@ -36,29 +38,19 @@ export default function PurchaseOrderDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const colorScheme = useColorScheme();
+  const isOnline = useIsOnline();
   const metaStyle = colorScheme === 'dark' ? styles.metaDark : styles.metaLight;
-  const [po, setPo] = useState<PurchaseOrderDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const fetchPo = useCallback(() => apiClient.getPurchaseOrder(id!), [id]);
+  const { data: po, error, isFromCache, reload: load } = useCachedFetch<PurchaseOrderDetail>(`purchaseOrder:${id}`, fetchPo);
   const [receiving, setReceiving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showReceiveForm, setShowReceiveForm] = useState(false);
   const [receivePrices, setReceivePrices] = useState<Record<string, string>>({});
   const [downloadingDocument, setDownloadingDocument] = useState(false);
 
-  const load = useCallback(() => {
-    if (!id) return;
-    apiClient
-      .getPurchaseOrder(id)
-      .then((data) => {
-        setPo(data);
-        setError(null);
-      })
-      .catch((err: Error) => setError(err.message));
-  }, [id]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (id) load();
+  }, [id, load]);
 
   const startReceiving = useCallback(() => {
     if (!po) return;
@@ -112,6 +104,7 @@ export default function PurchaseOrderDetailScreen() {
     <View style={styles.container}>
       <Stack.Screen options={{ title: po ? `PO #${po.id.slice(0, 8)}` : 'Purchase order' }} />
       {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
+      {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
       {!error && po === null && <ActivityIndicator style={styles.loading} />}
       {!error && po !== null && (
         <>
@@ -193,10 +186,11 @@ export default function PurchaseOrderDetailScreen() {
           </Pressable>
 
           {po.status === 'Ordered' && !showReceiveForm && (
-            <Pressable style={styles.button} onPress={startReceiving}>
+            <Pressable style={[styles.button, !isOnline && styles.buttonDisabled]} disabled={!isOnline} onPress={startReceiving}>
               <Text style={styles.buttonText}>Mark as received</Text>
             </Pressable>
           )}
+          {po.status === 'Ordered' && !isOnline && <Text style={styles.offlineNotice}>You're offline — receiving is disabled.</Text>}
 
           {po.status === 'Ordered' && showReceiveForm && (
             <View style={styles.receiveActions} lightColor="transparent" darkColor="transparent">
@@ -204,8 +198,8 @@ export default function PurchaseOrderDetailScreen() {
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </Pressable>
               <Pressable
-                style={[styles.button, styles.receiveConfirmButton, receiving && styles.buttonDisabled]}
-                disabled={receiving}
+                style={[styles.button, styles.receiveConfirmButton, (receiving || !isOnline) && styles.buttonDisabled]}
+                disabled={receiving || !isOnline}
                 onPress={performReceive}
               >
                 <Text style={styles.buttonText}>{receiving ? 'Confirming…' : 'Confirm receipt'}</Text>
@@ -222,6 +216,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 32 },
   loading: { marginTop: 40 },
   error: { color: '#c0392b', marginBottom: 12 },
+  cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
+  offlineNotice: { color: '#c0392b', fontSize: 12, marginTop: 8 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   updatedAt: { fontSize: 12 },
   total: { fontSize: 30, fontWeight: '700', marginBottom: 20 },
