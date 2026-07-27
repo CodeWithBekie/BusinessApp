@@ -2,13 +2,16 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { ReactNode, useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
 
-import { apiClient, PurchaseOrderDetail, ReceivedLinePrice } from '@/src/api/client';
+import { apiClient, PosPaymentMethod, PurchaseOrderDetail, ReceivedLinePrice } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { formatMoney } from '@/src/common/format';
 import { downloadAndShareDocument } from '@/src/documents/downloadAndShare';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
 import { useIsOnline } from '@/src/offline/networkStatus';
+import { useHasPermission } from '@/src/auth/permissions';
+
+const SUPPLIER_PAYMENT_METHODS: readonly PosPaymentMethod[] = ['Cash', 'EcoCash', 'Bank', 'Other'];
 
 const PO_STATUS_COLORS: Record<string, string> = {
   Draft: '#8e8e93',
@@ -39,6 +42,7 @@ export default function PurchaseOrderDetailScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const isOnline = useIsOnline();
+  const canManageSuppliers = useHasPermission('ManageSuppliers');
   const metaStyle = colorScheme === 'dark' ? styles.metaDark : styles.metaLight;
   const fetchPo = useCallback(() => apiClient.getPurchaseOrder(id!), [id]);
   const { data: po, error, isFromCache, reload: load } = useCachedFetch<PurchaseOrderDetail>(`purchaseOrder:${id}`, fetchPo);
@@ -47,6 +51,12 @@ export default function PurchaseOrderDetailScreen() {
   const [showReceiveForm, setShowReceiveForm] = useState(false);
   const [receivePrices, setReceivePrices] = useState<Record<string, string>>({});
   const [downloadingDocument, setDownloadingDocument] = useState(false);
+
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentProvider, setPaymentProvider] = useState<PosPaymentMethod>('Cash');
+  const [recordingPayment, setRecordingPayment] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) load();
@@ -87,6 +97,27 @@ export default function PurchaseOrderDetailScreen() {
     }
   }, [po, receivePrices, load]);
 
+  const recordPayment = useCallback(async () => {
+    if (!po) return;
+    setPaymentError(null);
+    const parsed = Number(paymentAmount);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setPaymentError('Enter a valid amount greater than zero.');
+      return;
+    }
+    setRecordingPayment(true);
+    try {
+      await apiClient.recordSupplierPayment(po.id, parsed, paymentProvider);
+      setShowPaymentForm(false);
+      setPaymentAmount('');
+      load();
+    } catch (err) {
+      setPaymentError((err as Error).message);
+    } finally {
+      setRecordingPayment(false);
+    }
+  }, [po, paymentAmount, paymentProvider, load]);
+
   const downloadDocument = useCallback(async () => {
     if (!po) return;
     setActionError(null);
@@ -114,6 +145,9 @@ export default function PurchaseOrderDetailScreen() {
           </View>
 
           <Text style={styles.total}>{formatMoney(po.totalAmount, po.currency)}</Text>
+          <Text style={[styles.amountOwedNote, metaStyle]}>
+            Paid {formatMoney(po.amountPaid, po.currency)} · Owed {formatMoney(po.amountOwed, po.currency)}
+          </Text>
 
           <Section title="Supplier">
             <Text style={styles.rowPrimary}>{po.supplierName}</Text>
@@ -185,6 +219,48 @@ export default function PurchaseOrderDetailScreen() {
             <Text style={styles.secondaryButtonText}>Ask Assistant about this</Text>
           </Pressable>
 
+          {canManageSuppliers && po.amountOwed > 0 && !showPaymentForm && (
+            <Pressable style={[styles.secondaryButton, !isOnline && styles.buttonDisabled]} disabled={!isOnline} onPress={() => setShowPaymentForm(true)}>
+              <Text style={styles.secondaryButtonText}>Record payment to supplier</Text>
+            </Pressable>
+          )}
+
+          {showPaymentForm && (
+            <View style={styles.paymentForm} lightColor="transparent" darkColor="transparent">
+              <Text style={[styles.priceLabel, metaStyle]}>Amount ({po.currency})</Text>
+              <TextInput
+                style={styles.priceInput}
+                value={paymentAmount}
+                onChangeText={setPaymentAmount}
+                keyboardType="decimal-pad"
+                placeholder={formatMoney(po.amountOwed, po.currency)}
+              />
+              <View style={styles.providerRow} lightColor="transparent" darkColor="transparent">
+                {SUPPLIER_PAYMENT_METHODS.map((method) => {
+                  const active = method === paymentProvider;
+                  return (
+                    <Pressable key={method} onPress={() => setPaymentProvider(method)} style={[styles.providerChip, active && styles.providerChipActive]}>
+                      <Text style={[styles.providerChipText, active && styles.providerChipTextActive]}>{method}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {paymentError && <Text style={styles.error}>{paymentError}</Text>}
+              <View style={styles.receiveActions} lightColor="transparent" darkColor="transparent">
+                <Pressable style={styles.modalCancelButtonWide} onPress={() => setShowPaymentForm(false)} disabled={recordingPayment}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.button, styles.receiveConfirmButton, (recordingPayment || !isOnline) && styles.buttonDisabled]}
+                  disabled={recordingPayment || !isOnline}
+                  onPress={recordPayment}
+                >
+                  <Text style={styles.buttonText}>{recordingPayment ? 'Recording…' : 'Confirm payment'}</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+
           {po.status === 'Ordered' && !showReceiveForm && (
             <Pressable style={[styles.button, !isOnline && styles.buttonDisabled]} disabled={!isOnline} onPress={startReceiving}>
               <Text style={styles.buttonText}>Mark as received</Text>
@@ -220,7 +296,14 @@ const styles = StyleSheet.create({
   offlineNotice: { color: '#c0392b', fontSize: 12, marginTop: 8 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   updatedAt: { fontSize: 12 },
-  total: { fontSize: 30, fontWeight: '700', marginBottom: 20 },
+  total: { fontSize: 30, fontWeight: '700', marginBottom: 4 },
+  amountOwedNote: { fontSize: 13, marginBottom: 16 },
+  paymentForm: { marginTop: 12, marginBottom: 4 },
+  providerRow: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' },
+  providerChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#ccc' },
+  providerChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
+  providerChipText: { fontSize: 13, fontWeight: '600', opacity: 0.7 },
+  providerChipTextActive: { color: '#fff', opacity: 1 },
   section: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 14, marginBottom: 16 },
   sectionTitle: { fontSize: 12, fontWeight: '700', opacity: 0.5, textTransform: 'uppercase', marginBottom: 10 },
   rowPrimary: { fontSize: 15, fontWeight: '600' },

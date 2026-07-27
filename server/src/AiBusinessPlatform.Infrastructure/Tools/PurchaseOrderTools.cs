@@ -30,7 +30,7 @@ public class PurchaseOrderTools(AiBusinessPlatformDbContext dbContext, ICurrentT
         return await query
             .OrderByDescending(x => x.po.CreatedAt)
             .Select(x => new PurchaseOrderSummary(
-                x.po.Id, x.s.Id, x.s.Name, x.po.Status, x.po.TotalAmount, x.po.Currency,
+                x.po.Id, x.s.Id, x.s.Name, x.po.Status, x.po.TotalAmount, x.po.AmountPaid, x.po.TotalAmount - x.po.AmountPaid, x.po.Currency,
                 dbContext.PurchaseOrderItems.Count(i => i.PurchaseOrderId == x.po.Id),
                 x.po.CreatedAt, x.po.UpdatedAt, x.po.ReceivedAt))
             .ToListAsync(cancellationToken);
@@ -63,7 +63,7 @@ public class PurchaseOrderTools(AiBusinessPlatformDbContext dbContext, ICurrentT
         ).ToListAsync(cancellationToken);
 
         return new PurchaseOrderDetail(
-            po.Id, po.SupplierId, supplier?.Name ?? "Unknown supplier", po.Status, po.TotalAmount, po.Currency, items,
+            po.Id, po.SupplierId, supplier?.Name ?? "Unknown supplier", po.Status, po.TotalAmount, po.AmountPaid, po.TotalAmount - po.AmountPaid, po.Currency, items,
             po.CreatedAt, po.UpdatedAt, po.ReceivedAt);
     }
 
@@ -224,6 +224,10 @@ public class PurchaseOrderTools(AiBusinessPlatformDbContext dbContext, ICurrentT
                     catalogItem.StockQuantity = (catalogItem.StockQuantity ?? 0) + line.Quantity;
                 }
 
+                // Cost is purchase-driven, not manually editable — always updated to the most
+                // recent purchase cost on receive (known simplification: not FIFO/weighted-average).
+                catalogItem.Cost = line.UnitCost;
+
                 if (salePrice is decimal newPrice)
                 {
                     if (newPrice <= 0)
@@ -264,6 +268,11 @@ public class PurchaseOrderTools(AiBusinessPlatformDbContext dbContext, ICurrentT
                     unit: line.NewItemUnit, code: null, cancellationToken);
 
                 line.CatalogItemId = newCatalogItem.Id;
+
+                // Cost isn't part of ICatalogTools.CreateCatalogItemAsync's contract (purchase-driven,
+                // not a manually-settable catalog field) — set it directly on the tracked entity here.
+                var createdEntity = await dbContext.CatalogItems.FirstAsync(c => c.Id == newCatalogItem.Id, cancellationToken);
+                createdEntity.Cost = line.UnitCost;
             }
         }
 
@@ -282,6 +291,50 @@ public class PurchaseOrderTools(AiBusinessPlatformDbContext dbContext, ICurrentT
             EntityId = purchaseOrder.Id.ToString(),
             BeforeStateJson = "{}",
             AfterStateJson = JsonSerializer.Serialize(new { Status = purchaseOrder.Status.ToString() }),
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return await GetPurchaseOrderAsync(businessId, purchaseOrder.Id, cancellationToken);
+    }
+
+    public async Task<PurchaseOrderDetail> RecordSupplierPaymentAsync(
+        Guid businessId, Guid purchaseOrderId, decimal amount, PaymentProvider provider, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+        if (amount <= 0)
+        {
+            throw new ArgumentException("amount must be greater than zero.", nameof(amount));
+        }
+
+        var purchaseOrder = await dbContext.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == purchaseOrderId, cancellationToken)
+            ?? throw new ArgumentException($"Purchase order {purchaseOrderId} not found.", nameof(purchaseOrderId));
+
+        var amountOwed = purchaseOrder.TotalAmount - purchaseOrder.AmountPaid;
+        if (amount > amountOwed)
+        {
+            throw new ArgumentException($"Amount ({amount}) exceeds the amount owed ({amountOwed}).", nameof(amount));
+        }
+
+        var previousAmountPaid = purchaseOrder.AmountPaid;
+        purchaseOrder.AmountPaid += amount;
+        purchaseOrder.UpdatedAt = DateTimeOffset.UtcNow;
+
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            BusinessId = tenantProvider.CurrentBusinessId,
+            ActorType = AuditActorType.User,
+            ActorId = "pos",
+            Action = "purchase_order.payment_recorded",
+            EntityType = nameof(PurchaseOrder),
+            EntityId = purchaseOrder.Id.ToString(),
+            BeforeStateJson = JsonSerializer.Serialize(new { AmountPaid = previousAmountPaid }),
+            AfterStateJson = JsonSerializer.Serialize(new { purchaseOrder.AmountPaid, Provider = provider.ToString(), Amount = amount }),
             CreatedAt = DateTimeOffset.UtcNow
         });
 

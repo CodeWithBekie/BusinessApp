@@ -266,6 +266,35 @@ export const apiClient = {
       method: 'POST',
       body: linePrices ? JSON.stringify({ linePrices }) : undefined,
     }),
+  recordSupplierPayment: (id: string, amount: number, provider: PosPaymentMethod) =>
+    request<PurchaseOrderDetail>(`/api/purchase-orders/${id}/payment`, {
+      method: 'POST',
+      body: JSON.stringify({ amount, provider }),
+    }),
+
+  getExpenses: (from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const qs = params.toString();
+    return request<ExpenseSummary[]>(`/api/expenses${qs ? `?${qs}` : ''}`);
+  },
+  createExpense: (input: CreateExpenseInput) =>
+    request<ExpenseSummary>('/api/expenses', { method: 'POST', body: JSON.stringify(input) }),
+  deleteExpense: (id: string) => request<void>(`/api/expenses/${id}`, { method: 'DELETE' }),
+
+  getCashUp: (date?: string) => request<CashUpResult>(`/api/accounting/cash-up${date ? `?date=${date}` : ''}`),
+  getProfitAndLoss: (range?: SalesRange, from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (from && to) {
+      params.set('from', from);
+      params.set('to', to);
+    } else if (range) {
+      params.set('range', range);
+    }
+    const qs = params.toString();
+    return request<ProfitAndLossResult>(`/api/accounting/profit-and-loss${qs ? `?${qs}` : ''}`);
+  },
 
   ingestDocument: (title: string, content: string, sourceType?: string) =>
     request<IngestDocumentResult>('/api/documents', {
@@ -685,6 +714,8 @@ export interface PurchaseOrderSummary {
   supplierName: string;
   status: PurchaseOrderStatus;
   totalAmount: number;
+  amountPaid: number;
+  amountOwed: number;
   currency: string;
   itemCount: number;
   createdAt: string;
@@ -698,9 +729,67 @@ export interface PurchaseOrderDetail {
   supplierName: string;
   status: PurchaseOrderStatus;
   totalAmount: number;
+  amountPaid: number;
+  amountOwed: number;
   currency: string;
   items: PurchaseOrderItemSummary[];
   createdAt: string;
   updatedAt: string;
   receivedAt: string | null;
+}
+
+export type ExpenseCategory = 'Rent' | 'Utilities' | 'Wages' | 'Supplies' | 'Transport' | 'Marketing' | 'Other';
+
+export interface ExpenseSummary {
+  id: string;
+  category: ExpenseCategory;
+  description: string;
+  amount: number;
+  currency: string;
+  paymentMethod: PosPaymentMethod;
+  incurredAt: string;
+  createdAt: string;
+}
+
+export interface CreateExpenseInput {
+  category: ExpenseCategory;
+  description: string;
+  amount: number;
+  currency?: string | null;
+  paymentMethod: PosPaymentMethod;
+  incurredAt?: string | null;
+}
+
+export interface CashUpProviderTotal {
+  provider: PosPaymentMethod;
+  count: number;
+  totalAmount: number;
+}
+
+export interface CashUpCurrencyGroup {
+  currency: string;
+  salesByProvider: CashUpProviderTotal[];
+  expensesByProvider: CashUpProviderTotal[];
+  netCashMovement: number;
+}
+
+export interface CashUpResult {
+  date: string;
+  currencies: CashUpCurrencyGroup[];
+}
+
+export interface ProfitAndLossCurrencyBreakdown {
+  currency: string;
+  revenue: number;
+  costOfGoodsSold: number;
+  grossProfit: number;
+  expenses: number;
+  netProfit: number;
+}
+
+export interface ProfitAndLossResult {
+  range: string;
+  rangeStart: string | null;
+  rangeEnd: string | null;
+  currencies: ProfitAndLossCurrencyBreakdown[];
 }

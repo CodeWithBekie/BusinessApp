@@ -9,6 +9,7 @@ public class PurchaseOrderConfiguration : IEntityTypeConfiguration<PurchaseOrder
     public void Configure(EntityTypeBuilder<PurchaseOrder> builder)
     {
         builder.Property(x => x.TotalAmount).HasPrecision(18, 2);
+        builder.Property(x => x.AmountPaid).HasPrecision(18, 2);
         builder.HasIndex(x => x.BusinessId);
         builder.HasIndex(x => new { x.BusinessId, x.SupplierId });
 

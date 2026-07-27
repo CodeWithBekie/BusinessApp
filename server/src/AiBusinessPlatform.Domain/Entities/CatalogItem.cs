@@ -8,6 +8,7 @@ public class CatalogItem : ITenantScoped
     public string? Code { get; set; }
     public CatalogItemType ItemType { get; set; }
     public decimal Price { get; set; }
+    public decimal? Cost { get; set; } // most recent purchase-order unit cost — null until ever purchased
     public string Currency { get; set; } = "USD";
     public int? StockQuantity { get; set; }
     public string Unit { get; set; } = "each";

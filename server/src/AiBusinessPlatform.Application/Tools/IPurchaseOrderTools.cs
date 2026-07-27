@@ -14,11 +14,11 @@ public record PurchaseOrderItemSummary(
     Guid Id, Guid? CatalogItemId, string Name, bool IsNewItem, decimal? CurrentPrice, int Quantity, decimal UnitCost, decimal Subtotal);
 
 public record PurchaseOrderSummary(
-    Guid Id, Guid SupplierId, string SupplierName, PurchaseOrderStatus Status, decimal TotalAmount, string Currency,
+    Guid Id, Guid SupplierId, string SupplierName, PurchaseOrderStatus Status, decimal TotalAmount, decimal AmountPaid, decimal AmountOwed, string Currency,
     int ItemCount, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? ReceivedAt);
 
 public record PurchaseOrderDetail(
-    Guid Id, Guid SupplierId, string SupplierName, PurchaseOrderStatus Status, decimal TotalAmount, string Currency,
+    Guid Id, Guid SupplierId, string SupplierName, PurchaseOrderStatus Status, decimal TotalAmount, decimal AmountPaid, decimal AmountOwed, string Currency,
     IReadOnlyList<PurchaseOrderItemSummary> Items, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? ReceivedAt);
 
 // One entry per PurchaseOrderItem being received. SalePrice is required when that line is a
@@ -43,4 +43,7 @@ public interface IPurchaseOrderTools
 
     [Description("Marks a purchase order as received in full: transitions it to Received and increases stock for every line item all at once. Only an Ordered purchase order can be received. Only call this once the owner has clearly confirmed the goods have actually arrived. Pass linePrices to set/override the catalog sale price per line (by purchaseOrderItemId) — a sale price is REQUIRED for any line that orders a new (not-yet-in-catalog) item, since receiving is what actually creates it in the catalog; it's optional for a line that restocks an existing item (omit to leave its price unchanged).")]
     Task<PurchaseOrderDetail> ReceivePurchaseOrderAsync(Guid businessId, Guid purchaseOrderId, IReadOnlyList<ReceivedLinePrice>? linePrices, CancellationToken cancellationToken = default);
+
+    [Description("Records a cash payment made to the supplier against a purchase order's outstanding balance. provider must be \"Cash\", \"EcoCash\", \"Bank\", or \"Other\". amount must be greater than zero and cannot exceed the order's current amount owed (total minus what's already been paid).")]
+    Task<PurchaseOrderDetail> RecordSupplierPaymentAsync(Guid businessId, Guid purchaseOrderId, decimal amount, PaymentProvider provider, CancellationToken cancellationToken = default);
 }

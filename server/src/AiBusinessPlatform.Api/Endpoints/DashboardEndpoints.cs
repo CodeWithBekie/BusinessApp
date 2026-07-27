@@ -445,6 +445,23 @@ public static class DashboardEndpoints
             }
         }).RequireAuthorization("Permission:ManageSuppliers");
 
+        // Records a cash payment made to the supplier against a PO's outstanding balance — a
+        // continuation of the existing PO lifecycle, not a distinct accounting action, so this
+        // stays under the same Permission:ManageSuppliers gate as every other PO endpoint here.
+        api.MapPost("/purchase-orders/{id:guid}/payment", async (
+            Guid id, RecordSupplierPaymentRequest request, IPurchaseOrderTools purchaseOrderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await purchaseOrderTools.RecordSupplierPaymentAsync(tenantProvider.CurrentBusinessId, id, request.Amount, request.Provider, ct);
+                return Results.Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        }).RequireAuthorization("Permission:ManageSuppliers");
+
         // Printable/downloadable PDF for a supplier purchase order — same shared document layout
         // as the order receipt above.
         api.MapGet("/purchase-orders/{id:guid}/document", async (

@@ -62,6 +62,8 @@ builder.Services.AddHttpClient<IWhatsAppSender, WhatsAppGraphClient>(client =>
 }).AddStandardResilienceHandler();
 builder.Services.AddScoped<IWhatsAppMessageService, WhatsAppMessageService>();
 builder.Services.AddScoped<IMessagingTools, MessagingTools>();
+builder.Services.AddScoped<IExpenseTools, ExpenseTools>();
+builder.Services.AddScoped<IAccountingTools, AccountingTools>();
 
 // Section 10.7 — the same C# functions the in-app orchestrator/dashboard/Assistant call, exposed
 // as MCP tools. The Assistant chat endpoint (Api project) is itself an MCP client of this server —

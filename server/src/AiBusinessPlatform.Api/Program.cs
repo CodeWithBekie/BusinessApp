@@ -105,6 +105,8 @@ builder.Services.AddScoped<IMarketplaceTools, MarketplaceTools>();
 builder.Services.AddScoped<IDocumentGenerationTools, DocumentGenerationTools>();
 builder.Services.AddScoped<IMessagingTools, MessagingTools>();
 builder.Services.AddScoped<IStaffTools, StaffTools>();
+builder.Services.AddScoped<IExpenseTools, ExpenseTools>();
+builder.Services.AddScoped<IAccountingTools, AccountingTools>();
 
 // Section 10.2 — where the Assistant chat endpoint finds the platform's own MCP server (it
 // connects as a real MCP client, forwarding the caller's own bearer token).
@@ -188,6 +190,7 @@ app.MapCustomerAuthEndpoints();
 app.MapWebhookEndpoints();
 app.MapDashboardEndpoints();
 app.MapStaffEndpoints();
+app.MapAccountingEndpoints();
 app.MapMarketplaceEndpoints();
 app.MapAssistantEndpoints();
 

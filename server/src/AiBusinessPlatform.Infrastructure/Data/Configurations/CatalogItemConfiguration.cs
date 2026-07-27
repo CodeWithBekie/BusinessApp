@@ -10,6 +10,7 @@ public class CatalogItemConfiguration : IEntityTypeConfiguration<CatalogItem>
     public void Configure(EntityTypeBuilder<CatalogItem> builder)
     {
         builder.Property(x => x.Price).HasPrecision(18, 2);
+        builder.Property(x => x.Cost).HasPrecision(18, 2);
         builder.HasIndex(x => x.BusinessId);
         builder.HasOne<Business>().WithMany().HasForeignKey(x => x.BusinessId).OnDelete(DeleteBehavior.Restrict);
 
