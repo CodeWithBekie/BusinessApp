@@ -26,6 +26,7 @@ export default function CatalogItemScreen() {
   const [existing, setExisting] = useState<CatalogItem | null>(null);
 
   const [name, setName] = useState('');
+  const [code, setCode] = useState('');
   const [itemType, setItemType] = useState<CatalogItemType>('Stock');
   const [price, setPrice] = useState('');
   const [currency, setCurrency] = useState('USD');
@@ -50,6 +51,7 @@ export default function CatalogItemScreen() {
         }
         setExisting(item);
         setName(item.name);
+        setCode(item.code ?? '');
         setItemType(item.itemType);
         setPrice(item.price.toString());
         setCurrency(item.currency);
@@ -90,6 +92,7 @@ export default function CatalogItemScreen() {
           currency: currency.trim() || 'USD',
           unit: unit.trim() || 'each',
           stockQuantity: parsedStock,
+          code: code.trim() || null,
         });
       } else {
         await apiClient.updateCatalogItem(id, {
@@ -98,6 +101,7 @@ export default function CatalogItemScreen() {
           currency: currency.trim() || 'USD',
           unit: unit.trim() || 'each',
           stockQuantity: itemType === 'Stock' ? parsedStock : undefined,
+          code: code.trim() || null,
         });
       }
       router.back();
@@ -106,7 +110,7 @@ export default function CatalogItemScreen() {
     } finally {
       setSaving(false);
     }
-  }, [isNew, id, name, itemType, price, currency, unit, stockQuantity, router]);
+  }, [isNew, id, name, code, itemType, price, currency, unit, stockQuantity, router]);
 
   const toggleActive = useCallback(async () => {
     if (!existing) return;
@@ -216,6 +220,9 @@ export default function CatalogItemScreen() {
 
           <Text style={styles.label}>Name</Text>
           <TextInput style={inputStyle} placeholder="e.g. Premium Widget" value={name} onChangeText={setName} />
+
+          <Text style={styles.label}>Code (optional)</Text>
+          <TextInput style={inputStyle} placeholder="e.g. SKU-1024" value={code} onChangeText={setCode} autoCapitalize="characters" />
 
           <Text style={styles.label}>Item type</Text>
           <View style={styles.typeRow} lightColor="transparent" darkColor="transparent">

@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 
 import { apiClient, MarketplaceOrderResult } from '@/src/api/client';
@@ -31,9 +31,20 @@ export default function CheckoutScreen() {
   const currency = lines[0]?.currency ?? 'USD';
   const total = lines.reduce((sum, line) => sum + line.price * line.quantity, 0);
 
+  const [vatRate, setVatRate] = useState(0);
+  const vatAmount = Math.round(total * vatRate * 100) / 100;
+  const grandTotal = total + vatAmount;
+
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<MarketplaceOrderResult | null>(null);
+
+  useEffect(() => {
+    apiClient
+      .getMarketplaceBusiness(businessId)
+      .then((business) => setVatRate(business.vatRate))
+      .catch(() => {});
+  }, [businessId]);
 
   const placeOrder = useCallback(async () => {
     setError(null);
@@ -80,9 +91,21 @@ export default function CheckoutScreen() {
           <Text style={styles.lineSubtotal}>{formatMoney(line.price * line.quantity, line.currency)}</Text>
         </View>
       ))}
+      {vatRate > 0 && (
+        <>
+          <View style={styles.lineRow} lightColor="transparent" darkColor="transparent">
+            <Text style={styles.lineName}>Subtotal</Text>
+            <Text style={styles.lineSubtotal}>{formatMoney(total, currency)}</Text>
+          </View>
+          <View style={styles.lineRow} lightColor="transparent" darkColor="transparent">
+            <Text style={styles.lineName}>VAT ({(vatRate * 100).toFixed(vatRate * 100 % 1 === 0 ? 0 : 2)}%)</Text>
+            <Text style={styles.lineSubtotal}>{formatMoney(vatAmount, currency)}</Text>
+          </View>
+        </>
+      )}
       <View style={styles.totalRow} lightColor="transparent" darkColor="transparent">
         <Text style={styles.totalLabel}>Total</Text>
-        <Text style={styles.totalValue}>{formatMoney(total, currency)}</Text>
+        <Text style={styles.totalValue}>{formatMoney(grandTotal, currency)}</Text>
       </View>
 
       {error && <Text style={styles.error}>{error}</Text>}

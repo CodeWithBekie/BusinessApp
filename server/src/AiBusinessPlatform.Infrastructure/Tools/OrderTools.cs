@@ -36,8 +36,12 @@ public class OrderTools(
         var customer = await dbContext.Customers.FirstOrDefaultAsync(c => c.Id == customerId, cancellationToken)
             ?? throw new InvalidOperationException($"Customer {customerId} not found.");
 
-        order.TotalAmount = items.Sum(i => i.Subtotal);
+        order.VatAmount = items.Sum(i => i.VatAmount);
+        order.TotalAmount = items.Sum(i => i.Subtotal) + order.VatAmount;
         order.Status = OrderStatus.Invoiced;
+        order.InvoiceNumber = (await dbContext.Orders
+            .Where(o => o.BusinessId == businessId && o.InvoiceNumber != null)
+            .MaxAsync(o => (int?)o.InvoiceNumber, cancellationToken) ?? 0) + 1;
         order.UpdatedAt = DateTimeOffset.UtcNow;
 
         // Attempts a real Paynow Express Checkout transaction if the business has connected
@@ -62,15 +66,19 @@ public class OrderTools(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var catalogItemIds = items.Select(i => i.CatalogItemId).ToList();
-        var catalogNames = await dbContext.CatalogItems
+        var catalogInfo = await dbContext.CatalogItems
             .Where(c => catalogItemIds.Contains(c.Id))
-            .ToDictionaryAsync(c => c.Id, c => c.Name, cancellationToken);
+            .ToDictionaryAsync(c => c.Id, c => new { c.Name, c.Code }, cancellationToken);
 
         var lineItems = items
-            .Select(i => new InvoiceLineItem(i.CatalogItemId, catalogNames.GetValueOrDefault(i.CatalogItemId, "Unknown item"), i.Quantity, i.UnitPrice, i.Subtotal))
+            .Select(i =>
+            {
+                var info = catalogInfo.GetValueOrDefault(i.CatalogItemId);
+                return new InvoiceLineItem(i.CatalogItemId, info?.Name ?? "Unknown item", ResolveItemCode(info?.Code, i.CatalogItemId), i.Quantity, i.UnitPrice, i.Subtotal, i.VatAmount);
+            })
             .ToList();
 
-        return new InvoiceResult(order.Id, order.TotalAmount, order.Currency, paymentRequest.PaymentReference, paymentRequest.Instructions, lineItems);
+        return new InvoiceResult(order.Id, order.TotalAmount, order.VatAmount, order.Currency, paymentRequest.PaymentReference, paymentRequest.Instructions, lineItems);
     }
 
     public async Task<PaymentConfirmationResult> ConfirmPaymentAsync(Guid businessId, Guid orderId, CancellationToken cancellationToken = default)
@@ -456,19 +464,23 @@ public class OrderTools(
 
         var customer = await dbContext.Customers.AsNoTracking().FirstOrDefaultAsync(c => c.Id == order.CustomerId, cancellationToken);
 
-        var items = await (
+        var rawItems = await (
             from oi in dbContext.OrderItems.AsNoTracking()
             join ci in dbContext.CatalogItems.AsNoTracking() on oi.CatalogItemId equals ci.Id into ciJoin
             from ci in ciJoin.DefaultIfEmpty()
             where oi.OrderId == order.Id
-            select new InvoiceLineItem(oi.CatalogItemId, ci != null ? ci.Name : "Unknown item", oi.Quantity, oi.UnitPrice, oi.Subtotal)
+            select new { oi.CatalogItemId, Name = ci != null ? ci.Name : "Unknown item", Code = ci != null ? ci.Code : null, oi.Quantity, oi.UnitPrice, oi.Subtotal, oi.VatAmount }
         ).ToListAsync(cancellationToken);
+
+        var items = rawItems
+            .Select(i => new InvoiceLineItem(i.CatalogItemId, i.Name, ResolveItemCode(i.Code, i.CatalogItemId), i.Quantity, i.UnitPrice, i.Subtotal, i.VatAmount))
+            .ToList();
 
         var payment = await dbContext.Payments.AsNoTracking().FirstOrDefaultAsync(p => p.OrderId == order.Id, cancellationToken);
 
         return new OrderDetailSummary(
             order.Id, order.CustomerId, customer?.WhatsAppNumber ?? "", customer?.Name,
-            order.Status, order.TotalAmount, order.Currency, items,
+            order.Status, order.TotalAmount, order.VatAmount, order.InvoiceNumber, order.Currency, items,
             payment is null ? null : new OrderPaymentSummary(payment.Provider, payment.ProviderReference, payment.Status, payment.Amount, payment.ConfirmedAt, payment.AmountTendered, payment.AmountTendered - payment.Amount),
             order.CreatedAt, order.UpdatedAt);
     }
@@ -557,13 +569,18 @@ public class OrderTools(
         };
         dbContext.Orders.Add(order);
 
+        var vatRate = await GetVatRateAsync(cancellationToken);
+
         var lineItems = new List<InvoiceLineItem>();
         decimal total = 0m;
+        decimal totalVat = 0m;
         foreach (var line in items)
         {
             var catalogItem = catalogItems[line.CatalogItemId];
             var subtotal = catalogItem.Price * line.Quantity;
+            var lineVat = VatCalculator.CalculateVat(subtotal, vatRate);
             total += subtotal;
+            totalVat += lineVat;
 
             dbContext.OrderItems.Add(new OrderItem
             {
@@ -573,7 +590,8 @@ public class OrderTools(
                 CatalogItemId = catalogItem.Id,
                 Quantity = line.Quantity,
                 UnitPrice = catalogItem.Price,
-                Subtotal = subtotal
+                Subtotal = subtotal,
+                VatAmount = lineVat
             });
 
             if (catalogItem.ItemType == CatalogItemType.Stock && catalogItem.StockQuantity is not null)
@@ -582,13 +600,15 @@ public class OrderTools(
                 catalogItem.UpdatedAt = DateTimeOffset.UtcNow;
             }
 
-            lineItems.Add(new InvoiceLineItem(catalogItem.Id, catalogItem.Name, line.Quantity, catalogItem.Price, subtotal));
+            lineItems.Add(new InvoiceLineItem(catalogItem.Id, catalogItem.Name, ResolveItemCode(catalogItem.Code, catalogItem.Id), line.Quantity, catalogItem.Price, subtotal, lineVat));
         }
-        order.TotalAmount = total;
+        var grandTotal = total + totalVat;
+        order.TotalAmount = grandTotal;
+        order.VatAmount = totalVat;
 
-        if (amountTendered is not null && amountTendered < total)
+        if (amountTendered is not null && amountTendered < grandTotal)
         {
-            throw new ArgumentException($"Amount tendered ({amountTendered}) is less than the total ({total}).", nameof(amountTendered));
+            throw new ArgumentException($"Amount tendered ({amountTendered}) is less than the total ({grandTotal}).", nameof(amountTendered));
         }
 
         // Short and spoken-aloud-friendly (e.g. "P-O-S dash K7 M2") rather than a 32-char GUID, since
@@ -603,7 +623,7 @@ public class OrderTools(
             OrderId = order.Id,
             Provider = provider,
             ProviderReference = providerReference,
-            Amount = total,
+            Amount = grandTotal,
             AmountTendered = amountTendered,
             Status = PaymentStatus.Confirmed,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -641,8 +661,8 @@ public class OrderTools(
         }
 
         return new PosSaleResult(
-            order.Id, total, saleCurrency!, providerReference, lineItems, customer.Id, customer.WhatsAppNumber, customer.Name,
-            amountTendered, amountTendered - total);
+            order.Id, grandTotal, totalVat, saleCurrency!, providerReference, lineItems, customer.Id, customer.WhatsAppNumber, customer.Name,
+            amountTendered, amountTendered - grandTotal);
     }
 
     // The "not paid yet" counterpart to RecordPosSaleAsync above — reuses
@@ -716,13 +736,17 @@ public class OrderTools(
 
         var order = await dbContext.Orders.FirstAsync(o => o.CustomerId == customer.Id && o.Status == OrderStatus.Quoted, cancellationToken);
 
-        var lineItems = await (
+        var rawLineItems = await (
             from oi in dbContext.OrderItems.AsNoTracking()
             join ci in dbContext.CatalogItems.AsNoTracking() on oi.CatalogItemId equals ci.Id into ciJoin
             from ci in ciJoin.DefaultIfEmpty()
             where oi.OrderId == order.Id
-            select new InvoiceLineItem(oi.CatalogItemId, ci != null ? ci.Name : "Unknown item", oi.Quantity, oi.UnitPrice, oi.Subtotal)
+            select new { oi.CatalogItemId, Name = ci != null ? ci.Name : "Unknown item", Code = ci != null ? ci.Code : null, oi.Quantity, oi.UnitPrice, oi.Subtotal, oi.VatAmount }
         ).ToListAsync(cancellationToken);
+
+        var lineItems = rawLineItems
+            .Select(i => new InvoiceLineItem(i.CatalogItemId, i.Name, ResolveItemCode(i.Code, i.CatalogItemId), i.Quantity, i.UnitPrice, i.Subtotal, i.VatAmount))
+            .ToList();
 
         dbContext.AuditLogs.Add(new AuditLog
         {
@@ -739,8 +763,16 @@ public class OrderTools(
         });
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return new QuotationResult(order.Id, order.TotalAmount, order.Currency, lineItems, customer.Id, customer.WhatsAppNumber, customer.Name);
+        return new QuotationResult(order.Id, order.TotalAmount, order.VatAmount, order.Currency, lineItems, customer.Id, customer.WhatsAppNumber, customer.Name);
     }
+
+    private Task<decimal> GetVatRateAsync(CancellationToken cancellationToken) =>
+        dbContext.Businesses.Where(b => b.Id == tenantProvider.CurrentBusinessId).Select(b => b.VatRate).FirstAsync(cancellationToken);
+
+    // Invoices always need a non-empty Code column — falls back to a short, human-readable slice
+    // of the catalog item's own id when the owner hasn't set one.
+    private static string ResolveItemCode(string? code, Guid catalogItemId) =>
+        string.IsNullOrWhiteSpace(code) ? catalogItemId.ToString()[..8].ToUpperInvariant() : code;
 
     // Excludes visually-confusable characters (0/O, 1/I) since a cashier or customer reads this
     // back manually. 4 chars from a 32-symbol alphabet is ~1M combinations — collisions are rare

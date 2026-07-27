@@ -5,6 +5,7 @@ public class CatalogItem : ITenantScoped
     public Guid Id { get; set; }
     public Guid BusinessId { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? Code { get; set; }
     public CatalogItemType ItemType { get; set; }
     public decimal Price { get; set; }
     public string Currency { get; set; } = "USD";

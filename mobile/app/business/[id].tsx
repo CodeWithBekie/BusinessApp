@@ -63,6 +63,15 @@ export default function BusinessStorefrontScreen() {
   const isOnline = useIsOnline();
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<Record<string, CartLine>>({});
+  const [vatRate, setVatRate] = useState(0);
+
+  useEffect(() => {
+    if (!id) return;
+    apiClient
+      .getMarketplaceBusiness(id)
+      .then((business) => setVatRate(business.vatRate))
+      .catch(() => {});
+  }, [id]);
 
   const fetchCatalog = useCallback(() => apiClient.getMarketplaceCatalog(id), [id]);
   const { data: items, error, isFromCache, reload: load } = useCachedFetch<CatalogItem[]>(`marketplace:catalog:${id}`, fetchCatalog);
@@ -103,6 +112,8 @@ export default function BusinessStorefrontScreen() {
 
   const cartLines = Object.values(cart);
   const total = cartLines.reduce((sum, line) => sum + line.item.price * line.quantity, 0);
+  const vatAmount = Math.round(total * vatRate * 100) / 100;
+  const grandTotal = total + vatAmount;
   const currency = cartLines[0]?.item.currency ?? 'USD';
 
   const availableItems = (items ?? []).filter((item) => item.active && item.name.toLowerCase().includes(search.trim().toLowerCase()));
@@ -152,9 +163,21 @@ export default function BusinessStorefrontScreen() {
 
           {cartLines.length > 0 && (
             <>
+              {vatRate > 0 && (
+                <View style={styles.cartRow} lightColor="transparent" darkColor="transparent">
+                  <Text style={styles.cartName}>Subtotal</Text>
+                  <Text style={styles.cartSubtotal}>{formatMoney(total, currency)}</Text>
+                </View>
+              )}
+              {vatRate > 0 && (
+                <View style={styles.cartRow} lightColor="transparent" darkColor="transparent">
+                  <Text style={styles.cartName}>VAT ({(vatRate * 100).toFixed(vatRate * 100 % 1 === 0 ? 0 : 2)}%)</Text>
+                  <Text style={styles.cartSubtotal}>{formatMoney(vatAmount, currency)}</Text>
+                </View>
+              )}
               <View style={styles.totalRow} lightColor="transparent" darkColor="transparent">
                 <Text style={styles.totalLabel}>Total</Text>
-                <Text style={styles.totalValue}>{formatMoney(total, currency)}</Text>
+                <Text style={styles.totalValue}>{formatMoney(grandTotal, currency)}</Text>
               </View>
               {!isOnline && <Text style={styles.error}>You're offline — connect to check out.</Text>}
               <Pressable style={[styles.checkoutButton, !isOnline && styles.buttonDisabled]} disabled={!isOnline} onPress={goToCheckout}>

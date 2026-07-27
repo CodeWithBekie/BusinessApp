@@ -6,7 +6,7 @@ namespace AiBusinessPlatform.Application.Tools;
 public record CatalogAvailabilityMatch(Guid CatalogItemId, string Name, decimal Price, string Currency, int? StockQuantity);
 
 public record CatalogItemSummary(
-    Guid Id, string Name, CatalogItemType ItemType, decimal Price, string Currency,
+    Guid Id, string Name, string? Code, CatalogItemType ItemType, decimal Price, string Currency,
     int? StockQuantity, string Unit, bool Active, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, bool HasImage);
 
 public record CatalogItemImage(byte[] Data, string ContentType);
@@ -46,13 +46,13 @@ public interface ICatalogTools
     [Description("Lists this business's catalog items, optionally filtered to only active (non-deactivated) items.")]
     Task<IReadOnlyList<CatalogItemSummary>> ListCatalogItemsAsync(Guid businessId, bool? activeOnly, CancellationToken cancellationToken = default);
 
-    [Description("Creates a new catalog item. itemType must be \"Stock\", \"TimeBased\", or \"Quote\". currency defaults to USD, unit defaults to \"each\", stockQuantity only applies to Stock items.")]
-    Task<CatalogItemSummary> CreateCatalogItemAsync(Guid businessId, string name, CatalogItemType itemType, decimal price, string? currency, int? stockQuantity, string? unit, CancellationToken cancellationToken = default);
+    [Description("Creates a new catalog item. itemType must be \"Stock\", \"TimeBased\", or \"Quote\". currency defaults to USD, unit defaults to \"each\", stockQuantity only applies to Stock items. code is an optional SKU/item code shown on invoices.")]
+    Task<CatalogItemSummary> CreateCatalogItemAsync(Guid businessId, string name, CatalogItemType itemType, decimal price, string? currency, int? stockQuantity, string? unit, string? code, CancellationToken cancellationToken = default);
 
     // Partial update — only supplied (non-null) fields change. itemType is deliberately not
     // patchable here (see UpdateCatalogItemAsync's own remarks).
-    [Description("Edits an existing catalog item's name, price, currency, unit, stock quantity, and/or active status. Only the fields provided are changed; omit a field to leave it as-is. Set active=false to deactivate an item, active=true to reactivate it.")]
-    Task<CatalogItemSummary> UpdateCatalogItemAsync(Guid businessId, Guid itemId, string? name, decimal? price, string? currency, int? stockQuantity, string? unit, bool? active, CancellationToken cancellationToken = default);
+    [Description("Edits an existing catalog item's name, price, currency, unit, stock quantity, code, and/or active status. Only the fields provided are changed; omit a field to leave it as-is. Set active=false to deactivate an item, active=true to reactivate it.")]
+    Task<CatalogItemSummary> UpdateCatalogItemAsync(Guid businessId, Guid itemId, string? name, decimal? price, string? currency, int? stockQuantity, string? unit, bool? active, string? code, CancellationToken cancellationToken = default);
 
     // Not exposed to the AI assistant/MCP — a narrow, transport-facing capability (raw bytes),
     // not a business action the model has any reason to see or set.

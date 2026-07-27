@@ -9,6 +9,7 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
     public void Configure(EntityTypeBuilder<Order> builder)
     {
         builder.Property(x => x.TotalAmount).HasPrecision(18, 2);
+        builder.Property(x => x.VatAmount).HasPrecision(18, 2);
         builder.HasIndex(x => x.BusinessId);
         builder.HasIndex(x => new { x.BusinessId, x.Status });
         // Order-to-cash lookups: "find the customer's current open (Quoted) order".

@@ -24,11 +24,11 @@ public class CatalogMcpTools(ICatalogTools catalogTools, ICurrentTenantProvider 
     public Task<IReadOnlyList<CatalogItemSummary>> ListCatalogItems(bool? activeOnly = null, CancellationToken cancellationToken = default)
         => catalogTools.ListCatalogItemsAsync(tenantProvider.CurrentBusinessId, activeOnly, cancellationToken);
 
-    [McpServerTool(Name = "create_catalog_item"), Description("Creates a new catalog item. itemType must be \"Stock\", \"TimeBased\", or \"Quote\". currency defaults to USD, unit defaults to \"each\", stockQuantity only applies to Stock items. Only call this when the owner has clearly and explicitly asked to add a new item.")]
-    public Task<CatalogItemSummary> CreateCatalogItem(string name, CatalogItemType itemType, decimal price, string? currency = null, int? stockQuantity = null, string? unit = null, CancellationToken cancellationToken = default)
-        => catalogTools.CreateCatalogItemAsync(tenantProvider.CurrentBusinessId, name, itemType, price, currency, stockQuantity, unit, cancellationToken);
+    [McpServerTool(Name = "create_catalog_item"), Description("Creates a new catalog item. itemType must be \"Stock\", \"TimeBased\", or \"Quote\". currency defaults to USD, unit defaults to \"each\", stockQuantity only applies to Stock items. code is an optional SKU/item code shown on invoices. Only call this when the owner has clearly and explicitly asked to add a new item.")]
+    public Task<CatalogItemSummary> CreateCatalogItem(string name, CatalogItemType itemType, decimal price, string? currency = null, int? stockQuantity = null, string? unit = null, string? code = null, CancellationToken cancellationToken = default)
+        => catalogTools.CreateCatalogItemAsync(tenantProvider.CurrentBusinessId, name, itemType, price, currency, stockQuantity, unit, code, cancellationToken);
 
-    [McpServerTool(Name = "update_catalog_item"), Description("Edits an existing catalog item's name, price, currency, unit, stock quantity, and/or active status — only the fields provided are changed. Set active=false to deactivate an item, active=true to reactivate it. Only call this when the owner has clearly and explicitly asked for this change.")]
-    public Task<CatalogItemSummary> UpdateCatalogItem(Guid itemId, string? name = null, decimal? price = null, string? currency = null, int? stockQuantity = null, string? unit = null, bool? active = null, CancellationToken cancellationToken = default)
-        => catalogTools.UpdateCatalogItemAsync(tenantProvider.CurrentBusinessId, itemId, name, price, currency, stockQuantity, unit, active, cancellationToken);
+    [McpServerTool(Name = "update_catalog_item"), Description("Edits an existing catalog item's name, price, currency, unit, stock quantity, code, and/or active status — only the fields provided are changed. Set active=false to deactivate an item, active=true to reactivate it. Only call this when the owner has clearly and explicitly asked for this change.")]
+    public Task<CatalogItemSummary> UpdateCatalogItem(Guid itemId, string? name = null, decimal? price = null, string? currency = null, int? stockQuantity = null, string? unit = null, bool? active = null, string? code = null, CancellationToken cancellationToken = default)
+        => catalogTools.UpdateCatalogItemAsync(tenantProvider.CurrentBusinessId, itemId, name, price, currency, stockQuantity, unit, active, code, cancellationToken);
 }

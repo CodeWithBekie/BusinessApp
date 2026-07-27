@@ -3,14 +3,14 @@ using AiBusinessPlatform.Domain;
 
 namespace AiBusinessPlatform.Application.Tools;
 
-public record InvoiceLineItem(Guid CatalogItemId, string Name, int Quantity, decimal UnitPrice, decimal Subtotal);
+public record InvoiceLineItem(Guid CatalogItemId, string Name, string Code, int Quantity, decimal UnitPrice, decimal Subtotal, decimal VatAmount);
 
 // PaymentInstructions is null when no PaynowConnection is configured yet (manual/offline
 // reference); otherwise it's Paynow's own human-readable USSD prompt text (e.g. "Enter your PIN
 // on your phone to authorise this transaction") — the model reads this JSON verbatim when
 // phrasing its reply to the customer, so no orchestrator/system-prompt change is needed beyond
 // this field simply being present.
-public record InvoiceResult(Guid OrderId, decimal TotalAmount, string Currency, string PaymentReference, string? PaymentInstructions, IReadOnlyList<InvoiceLineItem> LineItems);
+public record InvoiceResult(Guid OrderId, decimal TotalAmount, decimal VatAmount, string Currency, string PaymentReference, string? PaymentInstructions, IReadOnlyList<InvoiceLineItem> LineItems);
 
 public record PaymentConfirmationResult(Guid OrderId, Guid PaymentId, OrderStatus OrderStatus, PaymentStatus PaymentStatus);
 
@@ -23,12 +23,12 @@ public record OrderFulfillmentResult(Guid OrderId, OrderStatus Status);
 public record PosSaleLineItem(Guid CatalogItemId, int Quantity);
 
 public record PosSaleResult(
-    Guid OrderId, decimal TotalAmount, string Currency, string PaymentReference, IReadOnlyList<InvoiceLineItem> LineItems,
+    Guid OrderId, decimal TotalAmount, decimal VatAmount, string Currency, string PaymentReference, IReadOnlyList<InvoiceLineItem> LineItems,
     Guid CustomerId, string CustomerWhatsAppNumber, string? CustomerName,
     decimal? AmountTendered, decimal? ChangeDue);
 
 public record QuotationResult(
-    Guid OrderId, decimal TotalAmount, string Currency, IReadOnlyList<InvoiceLineItem> LineItems,
+    Guid OrderId, decimal TotalAmount, decimal VatAmount, string Currency, IReadOnlyList<InvoiceLineItem> LineItems,
     Guid CustomerId, string CustomerWhatsAppNumber, string? CustomerName);
 
 public record OrderSummary(
@@ -40,7 +40,7 @@ public record OrderPaymentSummary(PaymentProvider Provider, string ProviderRefer
 
 public record OrderDetailSummary(
     Guid Id, Guid CustomerId, string CustomerWhatsAppNumber, string? CustomerName,
-    OrderStatus Status, decimal TotalAmount, string Currency,
+    OrderStatus Status, decimal TotalAmount, decimal VatAmount, int? InvoiceNumber, string Currency,
     IReadOnlyList<InvoiceLineItem> Items, OrderPaymentSummary? Payment,
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 

@@ -30,6 +30,44 @@ public static class DashboardEndpoints
             return Results.Ok(new BusinessVisibilityRequest(business.IsPubliclyListed));
         });
 
+        // Fiscal-invoice/VAT settings — the owner fills these in themselves (Section: ZIMRA-style
+        // invoice redesign). VatRate defaults to 0 on every business and only changes what's
+        // charged once the owner explicitly sets it here.
+        api.MapGet("/business", async (AiBusinessPlatformDbContext db, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            var business = await db.Businesses.AsNoTracking().FirstOrDefaultAsync(b => b.Id == tenantProvider.CurrentBusinessId, ct)
+                ?? throw new KeyNotFoundException("Business not found.");
+            return Results.Ok(new BusinessDetailsResponse(
+                business.Name, business.Tin, business.VatNumber, business.Address, business.Email, business.Phone,
+                business.VatRate, business.DeviceSerialNumber, business.FiscalDeviceId));
+        });
+
+        api.MapPatch("/business", async (
+            UpdateBusinessDetailsRequest request, AiBusinessPlatformDbContext db, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            if (request.VatRate < 0 || request.VatRate > 1)
+            {
+                return Results.BadRequest("vatRate must be between 0 and 1 (e.g. 0.15 for 15%).");
+            }
+
+            var business = await db.Businesses.FirstOrDefaultAsync(b => b.Id == tenantProvider.CurrentBusinessId, ct)
+                ?? throw new KeyNotFoundException("Business not found.");
+
+            business.Tin = string.IsNullOrWhiteSpace(request.Tin) ? null : request.Tin.Trim();
+            business.VatNumber = string.IsNullOrWhiteSpace(request.VatNumber) ? null : request.VatNumber.Trim();
+            business.Address = string.IsNullOrWhiteSpace(request.Address) ? null : request.Address.Trim();
+            business.Email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim();
+            business.Phone = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
+            business.VatRate = request.VatRate;
+            business.DeviceSerialNumber = string.IsNullOrWhiteSpace(request.DeviceSerialNumber) ? null : request.DeviceSerialNumber.Trim();
+            business.FiscalDeviceId = string.IsNullOrWhiteSpace(request.FiscalDeviceId) ? null : request.FiscalDeviceId.Trim();
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(new BusinessDetailsResponse(
+                business.Name, business.Tin, business.VatNumber, business.Address, business.Email, business.Phone,
+                business.VatRate, business.DeviceSerialNumber, business.FiscalDeviceId));
+        });
+
         // FR15 (Section 6.3) — thin mapping over ICatalogTools, the same functions the MCP
         // server's list_catalog_items/create_catalog_item/update_catalog_item tools call
         // (Section 10.2/10.7's "one function, multiple entry points").
@@ -43,7 +81,7 @@ public static class DashboardEndpoints
             {
                 var item = await catalogTools.CreateCatalogItemAsync(
                     tenantProvider.CurrentBusinessId, request.Name, request.ItemType, request.Price,
-                    request.Currency, request.StockQuantity, request.Unit, ct);
+                    request.Currency, request.StockQuantity, request.Unit, request.Code, ct);
                 return Results.Created($"/api/catalog/{item.Id}", item);
             }
             catch (ArgumentException ex)
@@ -59,7 +97,7 @@ public static class DashboardEndpoints
             {
                 var item = await catalogTools.UpdateCatalogItemAsync(
                     tenantProvider.CurrentBusinessId, id, request.Name, request.Price,
-                    request.Currency, request.StockQuantity, request.Unit, request.Active, ct);
+                    request.Currency, request.StockQuantity, request.Unit, request.Active, request.Code, ct);
                 return Results.Ok(item);
             }
             catch (ArgumentException ex)

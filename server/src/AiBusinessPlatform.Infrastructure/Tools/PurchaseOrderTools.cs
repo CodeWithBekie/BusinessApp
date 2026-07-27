@@ -261,7 +261,7 @@ public class PurchaseOrderTools(AiBusinessPlatformDbContext dbContext, ICurrentT
                 var newCatalogItem = await catalogTools.CreateCatalogItemAsync(
                     businessId, line.NewItemName!, line.NewItemType!.Value, newItemPrice, purchaseOrder.Currency,
                     stockQuantity: line.NewItemType == CatalogItemType.Stock ? line.Quantity : null,
-                    unit: line.NewItemUnit, cancellationToken);
+                    unit: line.NewItemUnit, code: null, cancellationToken);
 
                 line.CatalogItemId = newCatalogItem.Id;
             }

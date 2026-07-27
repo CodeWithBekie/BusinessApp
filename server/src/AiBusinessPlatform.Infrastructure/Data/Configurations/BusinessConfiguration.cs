@@ -9,6 +9,8 @@ public class BusinessConfiguration : IEntityTypeConfiguration<Business>
 {
     public void Configure(EntityTypeBuilder<Business> builder)
     {
+        builder.Property(x => x.VatRate).HasPrecision(5, 4);
+
         // Phase 0 dev seed so scaffolded endpoints have a real tenant to read/write against.
         builder.HasData(new Business
         {

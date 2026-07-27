@@ -10,6 +10,7 @@ public class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
     {
         builder.Property(x => x.UnitPrice).HasPrecision(18, 2);
         builder.Property(x => x.Subtotal).HasPrecision(18, 2);
+        builder.Property(x => x.VatAmount).HasPrecision(18, 2);
         builder.HasIndex(x => x.BusinessId);
         builder.HasIndex(x => x.OrderId);
 

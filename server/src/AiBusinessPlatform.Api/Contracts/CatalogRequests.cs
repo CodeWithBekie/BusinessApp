@@ -8,7 +8,8 @@ public record CreateCatalogItemRequest(
     decimal Price,
     string? Currency,
     int? StockQuantity,
-    string? Unit);
+    string? Unit,
+    string? Code);
 
 // PATCH semantics — every field is optional; only supplied fields are changed. ItemType is
 // deliberately not patchable (switching Stock <-> TimeBased/Quote after items/reservations exist
@@ -19,4 +20,5 @@ public record UpdateCatalogItemRequest(
     string? Currency,
     int? StockQuantity,
     string? Unit,
-    bool? Active);
+    bool? Active,
+    string? Code);

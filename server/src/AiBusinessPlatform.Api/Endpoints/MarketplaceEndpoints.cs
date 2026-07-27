@@ -1,6 +1,9 @@
 using AiBusinessPlatform.Api.Contracts;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
+using AiBusinessPlatform.Domain;
+using AiBusinessPlatform.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace AiBusinessPlatform.Api.Endpoints;
 
@@ -16,6 +19,20 @@ public static class MarketplaceEndpoints
 
         marketplace.MapGet("/businesses", async (IMarketplaceTools marketplaceTools, CancellationToken ct) =>
             Results.Ok(await marketplaceTools.ListPubliclyListedBusinessesAsync(ct)));
+
+        // Anonymous — lets the storefront preview an accurate VAT-inclusive total before checkout.
+        // Same visibility rule as the list above (IgnoreQueryFilters not needed: Business isn't
+        // ITenantScoped, so there's no ambient filter to bypass here regardless of caller identity).
+        marketplace.MapGet("/businesses/{businessId:guid}", async (
+            Guid businessId, AiBusinessPlatformDbContext db, CancellationToken ct) =>
+        {
+            var business = await db.Businesses.AsNoTracking()
+                .Where(b => b.Id == businessId && b.IsPubliclyListed && b.Status == BusinessStatus.Active)
+                .Select(b => new PublicBusinessSummary(b.Id, b.Name, b.IndustryType, b.Currency, b.VatRate))
+                .FirstOrDefaultAsync(ct);
+
+            return business is null ? Results.NotFound() : Results.Ok(business);
+        });
 
         marketplace.MapGet("/businesses/{businessId:guid}/catalog", async (
             Guid businessId, IMarketplaceTools marketplaceTools, ICurrentTenantSetter tenantSetter, CancellationToken ct) =>

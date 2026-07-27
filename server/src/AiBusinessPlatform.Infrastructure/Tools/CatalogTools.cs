@@ -54,6 +54,10 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
             return new ReserveStockResult(Guid.Empty, false, $"Only {catalogItem.StockQuantity} in stock, requested {quantity}.");
         }
 
+        var vatRate = await GetVatRateAsync(cancellationToken);
+        var lineAmount = catalogItem.Price * quantity;
+        var lineVat = VatCalculator.CalculateVat(lineAmount, vatRate);
+
         var order = await dbContext.Orders.FirstOrDefaultAsync(o => o.CustomerId == customerId && o.Status == OrderStatus.Quoted, cancellationToken);
         if (order is null)
         {
@@ -81,14 +85,16 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
                 CatalogItemId = itemId,
                 Quantity = quantity,
                 UnitPrice = catalogItem.Price,
-                Subtotal = catalogItem.Price * quantity
+                Subtotal = lineAmount,
+                VatAmount = lineVat
             };
             dbContext.OrderItems.Add(orderItem);
         }
         else
         {
             orderItem.Quantity += quantity;
-            orderItem.Subtotal += catalogItem.Price * quantity;
+            orderItem.Subtotal += lineAmount;
+            orderItem.VatAmount += lineVat;
         }
 
         if (catalogItem.StockQuantity is not null)
@@ -97,7 +103,8 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
         }
         catalogItem.UpdatedAt = DateTimeOffset.UtcNow;
 
-        order.TotalAmount += catalogItem.Price * quantity;
+        order.TotalAmount += lineAmount + lineVat;
+        order.VatAmount += lineVat;
         order.UpdatedAt = DateTimeOffset.UtcNow;
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -157,7 +164,8 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
             catalogItem.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
-        order.TotalAmount -= orderItem.Subtotal;
+        order.TotalAmount -= orderItem.Subtotal + orderItem.VatAmount;
+        order.VatAmount -= orderItem.VatAmount;
         order.UpdatedAt = DateTimeOffset.UtcNow;
 
         var releasedItemId = orderItem.Id;
@@ -209,14 +217,14 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
         return await query
             .OrderBy(c => c.Name)
             .Select(c => new CatalogItemSummary(
-                c.Id, c.Name, c.ItemType, c.Price, c.Currency, c.StockQuantity, c.Unit, c.Active,
+                c.Id, c.Name, c.Code, c.ItemType, c.Price, c.Currency, c.StockQuantity, c.Unit, c.Active,
                 c.CreatedAt, c.UpdatedAt, c.ImageData != null))
             .ToListAsync(cancellationToken);
     }
 
     public async Task<CatalogItemSummary> CreateCatalogItemAsync(
         Guid businessId, string name, CatalogItemType itemType, decimal price, string? currency, int? stockQuantity, string? unit,
-        CancellationToken cancellationToken = default)
+        string? code, CancellationToken cancellationToken = default)
     {
         if (businessId != tenantProvider.CurrentBusinessId)
         {
@@ -240,6 +248,7 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
             Id = Guid.NewGuid(),
             BusinessId = tenantProvider.CurrentBusinessId,
             Name = name.Trim(),
+            Code = string.IsNullOrWhiteSpace(code) ? null : code.Trim(),
             ItemType = itemType,
             Price = price,
             Currency = string.IsNullOrWhiteSpace(currency) ? "USD" : currency.Trim(),
@@ -257,7 +266,7 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
 
     public async Task<CatalogItemSummary> UpdateCatalogItemAsync(
         Guid businessId, Guid itemId, string? name, decimal? price, string? currency, int? stockQuantity, string? unit, bool? active,
-        CancellationToken cancellationToken = default)
+        string? code, CancellationToken cancellationToken = default)
     {
         if (businessId != tenantProvider.CurrentBusinessId)
         {
@@ -302,6 +311,10 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
         if (active is not null)
         {
             item.Active = active.Value;
+        }
+        if (code is not null)
+        {
+            item.Code = string.IsNullOrWhiteSpace(code) ? null : code.Trim();
         }
 
         item.UpdatedAt = DateTimeOffset.UtcNow;
@@ -362,7 +375,10 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
         return ToSummary(item);
     }
 
+    private Task<decimal> GetVatRateAsync(CancellationToken cancellationToken) =>
+        dbContext.Businesses.Where(b => b.Id == tenantProvider.CurrentBusinessId).Select(b => b.VatRate).FirstAsync(cancellationToken);
+
     private static CatalogItemSummary ToSummary(CatalogItem item) => new(
-        item.Id, item.Name, item.ItemType, item.Price, item.Currency,
+        item.Id, item.Name, item.Code, item.ItemType, item.Price, item.Currency,
         item.StockQuantity, item.Unit, item.Active, item.CreatedAt, item.UpdatedAt, item.ImageData != null);
 }

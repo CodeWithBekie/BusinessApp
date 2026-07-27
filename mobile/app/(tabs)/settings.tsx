@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, TextInput } from 'react-native';
 
 import { apiClient } from '@/src/api/client';
@@ -215,6 +215,113 @@ function BusinessVisibilityForm() {
   );
 }
 
+// Fiscal-invoice/VAT settings the owner fills in themselves — blank by default, printed on the
+// invoice PDF only if set (see DocumentGenerationTools.cs's BuildOrderInvoiceDocument). vatRate is
+// stored/sent as a decimal fraction (0.15) but edited here as a percentage (15) for readability.
+function BusinessDetailsForm() {
+  const inputStyle = useInputStyle();
+  const isOnline = useIsOnline();
+  const [tin, setTin] = useState('');
+  const [vatNumber, setVatNumber] = useState('');
+  const [address, setAddress] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [vatRatePercent, setVatRatePercent] = useState('0');
+  const [deviceSerialNumber, setDeviceSerialNumber] = useState('');
+  const [fiscalDeviceId, setFiscalDeviceId] = useState('');
+  const [status, setStatus] = useState<'loading' | 'idle' | 'saving' | 'error' | 'saved'>('loading');
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getBusiness()
+      .then((business) => {
+        if (cancelled) return;
+        setTin(business.tin ?? '');
+        setVatNumber(business.vatNumber ?? '');
+        setAddress(business.address ?? '');
+        setEmail(business.email ?? '');
+        setPhone(business.phone ?? '');
+        setVatRatePercent(String(business.vatRate * 100));
+        setDeviceSerialNumber(business.deviceSerialNumber ?? '');
+        setFiscalDeviceId(business.fiscalDeviceId ?? '');
+        setStatus('idle');
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setStatus('error');
+        setMessage((err as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const submit = async () => {
+    const parsedPercent = Number(vatRatePercent);
+    if (Number.isNaN(parsedPercent) || parsedPercent < 0 || parsedPercent > 100) {
+      setStatus('error');
+      setMessage('VAT rate must be a number between 0 and 100.');
+      return;
+    }
+    setStatus('saving');
+    setMessage(null);
+    try {
+      await apiClient.updateBusiness({
+        tin: tin.trim() || null,
+        vatNumber: vatNumber.trim() || null,
+        address: address.trim() || null,
+        email: email.trim() || null,
+        phone: phone.trim() || null,
+        vatRate: parsedPercent / 100,
+        deviceSerialNumber: deviceSerialNumber.trim() || null,
+        fiscalDeviceId: fiscalDeviceId.trim() || null,
+      });
+      setStatus('saved');
+      setMessage('Saved.');
+    } catch (err) {
+      setStatus('error');
+      setMessage((err as Error).message);
+    }
+  };
+
+  if (status === 'loading') {
+    return (
+      <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+        <Text style={styles.cardTitle}>Business details</Text>
+        <Text style={styles.cardSubtitle}>Loading…</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+      <Text style={styles.cardTitle}>Business details</Text>
+      <Text style={styles.cardSubtitle}>Used on your invoices/receipts. Leave a field blank to omit it from the PDF.</Text>
+      <TextInput style={inputStyle} placeholder="TIN" value={tin} onChangeText={setTin} autoCapitalize="none" />
+      <TextInput style={inputStyle} placeholder="VAT No" value={vatNumber} onChangeText={setVatNumber} autoCapitalize="none" />
+      <TextInput style={inputStyle} placeholder="Address" value={address} onChangeText={setAddress} multiline />
+      <TextInput style={inputStyle} placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+      <TextInput style={inputStyle} placeholder="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+      <TextInput
+        style={inputStyle}
+        placeholder="VAT rate (%)"
+        value={vatRatePercent}
+        onChangeText={setVatRatePercent}
+        keyboardType="decimal-pad"
+      />
+      <TextInput style={inputStyle} placeholder="Device Serial No" value={deviceSerialNumber} onChangeText={setDeviceSerialNumber} autoCapitalize="none" />
+      <TextInput style={inputStyle} placeholder="Fiscal Device ID" value={fiscalDeviceId} onChangeText={setFiscalDeviceId} autoCapitalize="none" />
+      <Pressable style={[styles.button, !isOnline && styles.buttonDisabled]} disabled={status === 'saving' || !isOnline} onPress={submit}>
+        <Text style={styles.buttonText}>{status === 'saving' ? 'Saving…' : 'Save'}</Text>
+      </Pressable>
+      {message && <Text style={status === 'error' ? styles.error : styles.success}>{message}</Text>}
+      {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
+    </View>
+  );
+}
+
 function useInputStyle() {
   const colorScheme = useColorScheme();
   return [styles.input, colorScheme === 'dark' ? styles.inputDark : styles.inputLight];
@@ -228,6 +335,7 @@ export default function SettingsScreen() {
       <Text style={styles.title}>Settings</Text>
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
       <BusinessVisibilityForm />
+      <BusinessDetailsForm />
       <WhatsAppConnectForm />
       <PaynowConnectForm />
       <DocumentUploadForm />

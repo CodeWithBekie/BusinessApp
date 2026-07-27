@@ -198,7 +198,15 @@ export default function OrderDetailScreen() {
             <Text style={[styles.updatedAt, metaStyle]}>Updated {new Date(order.updatedAt).toLocaleString()}</Text>
           </View>
 
-          <Text style={styles.total}>{formatMoney(order.totalAmount, order.currency)}</Text>
+          <View style={styles.totalBlock} lightColor="transparent" darkColor="transparent">
+            <Text style={styles.total}>{formatMoney(order.totalAmount, order.currency)}</Text>
+            {order.vatAmount > 0 && (
+              <Text style={[styles.vatNote, metaStyle]}>
+                incl. VAT {formatMoney(order.vatAmount, order.currency)}
+                {order.invoiceNumber !== null ? `  ·  Invoice #${order.invoiceNumber}` : ''}
+              </Text>
+            )}
+          </View>
 
           <Section title="Customer">
             <Text style={styles.rowPrimary}>{order.customerName ?? 'No name on file'}</Text>
@@ -375,7 +383,9 @@ const styles = StyleSheet.create({
   offlineNotice: { color: '#c0392b', fontSize: 12, marginBottom: 12 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   updatedAt: { fontSize: 12 },
-  total: { fontSize: 30, fontWeight: '700', marginBottom: 20 },
+  totalBlock: { marginBottom: 20 },
+  total: { fontSize: 30, fontWeight: '700' },
+  vatNote: { fontSize: 12, marginTop: 2 },
   section: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 14, marginBottom: 16 },
   sectionTitle: { fontSize: 12, fontWeight: '700', opacity: 0.5, textTransform: 'uppercase', marginBottom: 10 },
   rowPrimary: { fontSize: 15, fontWeight: '600' },

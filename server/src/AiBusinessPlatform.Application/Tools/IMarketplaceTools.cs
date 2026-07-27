@@ -2,15 +2,15 @@ using AiBusinessPlatform.Domain;
 
 namespace AiBusinessPlatform.Application.Tools;
 
-public record PublicBusinessSummary(Guid Id, string Name, string IndustryType, string Currency);
+public record PublicBusinessSummary(Guid Id, string Name, string IndustryType, string Currency, decimal VatRate);
 
 public record MarketplaceOrderResult(
-    Guid OrderId, Guid BusinessId, string BusinessName, decimal TotalAmount, string Currency,
+    Guid OrderId, Guid BusinessId, string BusinessName, decimal TotalAmount, decimal VatAmount, string Currency,
     string PaymentReference, string? PaymentInstructions, IReadOnlyList<InvoiceLineItem> LineItems);
 
 public record MarketplaceOrderSummary(
     Guid OrderId, Guid BusinessId, string BusinessName, OrderStatus Status,
-    decimal TotalAmount, string Currency, int ItemCount, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+    decimal TotalAmount, decimal VatAmount, string Currency, int ItemCount, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 
 // Customer-facing marketplace capabilities — kept separate from ICatalogTools/IOrderTools (which
 // stay business-owner/staff-facing) rather than bloating those interfaces further. Not exposed to

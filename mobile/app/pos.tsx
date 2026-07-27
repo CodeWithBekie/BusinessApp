@@ -122,6 +122,7 @@ export default function PosScreen() {
   const isOnline = useIsOnline();
 
   const [saleType, setSaleType] = useState<SaleType>('sale');
+  const [vatRate, setVatRate] = useState(0);
   const [items, setItems] = useState<CatalogItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -145,6 +146,10 @@ export default function PosScreen() {
       .getCatalog()
       .then((data) => setItems(data))
       .catch((err: Error) => setLoadError(err.message));
+    apiClient
+      .getBusiness()
+      .then((business) => setVatRate(business.vatRate))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -198,6 +203,8 @@ export default function PosScreen() {
 
   const cartLines = Object.values(cart);
   const total = cartLines.reduce((sum, line) => sum + line.item.price * line.quantity, 0);
+  const vatAmount = Math.round(total * vatRate * 100) / 100;
+  const grandTotal = total + vatAmount;
   const currency = cartLines[0]?.item.currency ?? 'USD';
   const mixedCurrency = cartLines.some((line) => line.item.currency !== currency);
 
@@ -253,8 +260,8 @@ export default function PosScreen() {
       setSaveError('All items in a sale must use the same currency.');
       return;
     }
-    if (showCashTender && tenderedValue !== null && tenderedValue < total) {
-      setSaveError(`Amount tendered is less than the total (${formatMoney(total, currency)}).`);
+    if (showCashTender && tenderedValue !== null && tenderedValue < grandTotal) {
+      setSaveError(`Amount tendered is less than the total (${formatMoney(grandTotal, currency)}).`);
       return;
     }
 
@@ -309,7 +316,7 @@ export default function PosScreen() {
     } finally {
       setSaving(false);
     }
-  }, [cartLines, mixedCurrency, paymentMethod, selectedCustomer, customerName, customerPhone, saleType, showCashTender, tenderedValue, total, currency]);
+  }, [cartLines, mixedCurrency, paymentMethod, selectedCustomer, customerName, customerPhone, saleType, showCashTender, tenderedValue, grandTotal, currency]);
 
   const downloadReceipt = useCallback(async () => {
     if (!result) return;
@@ -417,10 +424,24 @@ export default function PosScreen() {
             ))}
 
             {cartLines.length > 0 && (
-              <View style={styles.totalRow} lightColor="transparent" darkColor="transparent">
-                <Text style={styles.totalLabel}>Total</Text>
-                <Text style={styles.totalValue}>{formatMoney(total, currency)}</Text>
-              </View>
+              <>
+                {vatRate > 0 && (
+                  <View style={styles.subtotalRow} lightColor="transparent" darkColor="transparent">
+                    <Text style={styles.subtotalLabel}>Subtotal</Text>
+                    <Text style={styles.subtotalValue}>{formatMoney(total, currency)}</Text>
+                  </View>
+                )}
+                {vatRate > 0 && (
+                  <View style={styles.subtotalRow} lightColor="transparent" darkColor="transparent">
+                    <Text style={styles.subtotalLabel}>VAT ({(vatRate * 100).toFixed(vatRate * 100 % 1 === 0 ? 0 : 2)}%)</Text>
+                    <Text style={styles.subtotalValue}>{formatMoney(vatAmount, currency)}</Text>
+                  </View>
+                )}
+                <View style={styles.totalRow} lightColor="transparent" darkColor="transparent">
+                  <Text style={styles.totalLabel}>Total</Text>
+                  <Text style={styles.totalValue}>{formatMoney(grandTotal, currency)}</Text>
+                </View>
+              </>
             )}
 
             {saleType === 'sale' && (
@@ -444,16 +465,16 @@ export default function PosScreen() {
                 <Text style={styles.label}>Amount tendered (optional)</Text>
                 <TextInput
                   style={inputStyle}
-                  placeholder={`e.g. ${formatMoney(total, currency)}`}
+                  placeholder={`e.g. ${formatMoney(grandTotal, currency)}`}
                   value={amountTendered}
                   onChangeText={setAmountTendered}
                   keyboardType="decimal-pad"
                 />
                 {tenderedValue !== null && (
-                  <Text style={[styles.tenderedHint, tenderedValue < total && styles.tenderedInsufficient]}>
-                    {tenderedValue < total
-                      ? `Insufficient — needs ${formatMoney(total - tenderedValue, currency)} more`
-                      : `Change due: ${formatMoney(tenderedValue - total, currency)}`}
+                  <Text style={[styles.tenderedHint, tenderedValue < grandTotal && styles.tenderedInsufficient]}>
+                    {tenderedValue < grandTotal
+                      ? `Insufficient — needs ${formatMoney(grandTotal - tenderedValue, currency)} more`
+                      : `Change due: ${formatMoney(tenderedValue - grandTotal, currency)}`}
                   </Text>
                 )}
               </>
@@ -583,6 +604,9 @@ const styles = StyleSheet.create({
   stepperValue: { fontSize: 14, fontWeight: '600', minWidth: 18, textAlign: 'center' },
   removeButton: { paddingHorizontal: 4 },
   removeButtonText: { fontSize: 12, color: '#c0392b', fontWeight: '600' },
+  subtotalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  subtotalLabel: { fontSize: 13, opacity: 0.7 },
+  subtotalValue: { fontSize: 13, opacity: 0.7 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#ccc' },
   totalLabel: { fontSize: 15, fontWeight: '700' },
   totalValue: { fontSize: 17, fontWeight: '800' },

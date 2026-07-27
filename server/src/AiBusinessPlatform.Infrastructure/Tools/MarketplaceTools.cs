@@ -17,7 +17,7 @@ public class MarketplaceTools(
         return await dbContext.Businesses.AsNoTracking()
             .Where(b => b.IsPubliclyListed && b.Status == BusinessStatus.Active)
             .OrderBy(b => b.Name)
-            .Select(b => new PublicBusinessSummary(b.Id, b.Name, b.IndustryType, b.Currency))
+            .Select(b => new PublicBusinessSummary(b.Id, b.Name, b.IndustryType, b.Currency, b.VatRate))
             .ToListAsync(cancellationToken);
     }
 
@@ -50,7 +50,7 @@ public class MarketplaceTools(
             .FirstAsync(cancellationToken);
 
         return new MarketplaceOrderResult(
-            invoice.OrderId, businessId, businessName, invoice.TotalAmount, invoice.Currency,
+            invoice.OrderId, businessId, businessName, invoice.TotalAmount, invoice.VatAmount, invoice.Currency,
             invoice.PaymentReference, invoice.PaymentInstructions, invoice.LineItems);
     }
 
@@ -91,7 +91,7 @@ public class MarketplaceTools(
         return orders
             .Select(o => new MarketplaceOrderSummary(
                 o.Id, o.BusinessId, businessNames.GetValueOrDefault(o.BusinessId, "Unknown business"), o.Status,
-                o.TotalAmount, o.Currency, itemCounts.GetValueOrDefault(o.Id, 0), o.CreatedAt, o.UpdatedAt))
+                o.TotalAmount, o.VatAmount, o.Currency, itemCounts.GetValueOrDefault(o.Id, 0), o.CreatedAt, o.UpdatedAt))
             .ToList();
     }
 

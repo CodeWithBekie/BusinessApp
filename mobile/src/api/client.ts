@@ -166,6 +166,10 @@ export const apiClient = {
       body: JSON.stringify({ businessName, industryType, ownerName, email, password }),
     }),
 
+  getBusiness: () => request<BusinessDetails>('/api/business'),
+  updateBusiness: (input: UpdateBusinessDetailsInput) =>
+    request<BusinessDetails>('/api/business', { method: 'PATCH', body: JSON.stringify(input) }),
+
   getCatalog: () => request<CatalogItem[]>('/api/catalog'),
   createCatalogItem: (input: CreateCatalogItemInput) =>
     request<CatalogItem>('/api/catalog', { method: 'POST', body: JSON.stringify(input) }),
@@ -293,6 +297,7 @@ export const apiClient = {
     }),
 
   getMarketplaceBusinesses: () => request<PublicBusinessSummary[]>('/api/marketplace/businesses'),
+  getMarketplaceBusiness: (businessId: string) => request<PublicBusinessSummary>(`/api/marketplace/businesses/${businessId}`),
   getMarketplaceCatalog: (businessId: string) => request<CatalogItem[]>(`/api/marketplace/businesses/${businessId}/catalog`),
   placeMarketplaceOrder: (businessId: string, items: PosSaleLineItem[]) =>
     request<MarketplaceOrderResult>(`/api/marketplace/businesses/${businessId}/orders`, {
@@ -321,6 +326,7 @@ export interface PublicBusinessSummary {
   name: string;
   industryType: string;
   currency: string;
+  vatRate: number;
 }
 
 export interface MarketplaceOrderResult {
@@ -328,6 +334,7 @@ export interface MarketplaceOrderResult {
   businessId: string;
   businessName: string;
   totalAmount: number;
+  vatAmount: number;
   currency: string;
   paymentReference: string;
   paymentInstructions: string | null;
@@ -340,10 +347,34 @@ export interface MarketplaceOrderSummary {
   businessName: string;
   status: OrderStatus;
   totalAmount: number;
+  vatAmount: number;
   currency: string;
   itemCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BusinessDetails {
+  name: string;
+  tin: string | null;
+  vatNumber: string | null;
+  address: string | null;
+  email: string | null;
+  phone: string | null;
+  vatRate: number;
+  deviceSerialNumber: string | null;
+  fiscalDeviceId: string | null;
+}
+
+export interface UpdateBusinessDetailsInput {
+  tin?: string | null;
+  vatNumber?: string | null;
+  address?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  vatRate: number;
+  deviceSerialNumber?: string | null;
+  fiscalDeviceId?: string | null;
 }
 
 export type CatalogItemType = 'Stock' | 'TimeBased' | 'Quote';
@@ -351,6 +382,7 @@ export type CatalogItemType = 'Stock' | 'TimeBased' | 'Quote';
 export interface CatalogItem {
   id: string;
   name: string;
+  code: string | null;
   itemType: CatalogItemType;
   price: number;
   currency: string;
@@ -369,6 +401,7 @@ export interface CreateCatalogItemInput {
   currency?: string;
   stockQuantity?: number | null;
   unit?: string;
+  code?: string | null;
 }
 
 export interface UpdateCatalogItemInput {
@@ -378,6 +411,7 @@ export interface UpdateCatalogItemInput {
   stockQuantity?: number | null;
   unit?: string;
   active?: boolean;
+  code?: string | null;
 }
 
 export type OrderStatus = 'Quoted' | 'Invoiced' | 'Paid' | 'Fulfilled' | 'Cancelled';
@@ -398,9 +432,11 @@ export interface OrderListItem {
 export interface OrderLineItem {
   catalogItemId: string;
   name: string;
+  code: string;
   quantity: number;
   unitPrice: number;
   subtotal: number;
+  vatAmount: number;
 }
 
 export interface OrderPayment {
@@ -416,6 +452,7 @@ export interface OrderPayment {
 export interface InvoiceResult {
   orderId: string;
   totalAmount: number;
+  vatAmount: number;
   currency: string;
   paymentReference: string;
   paymentInstructions: string | null;
@@ -429,6 +466,8 @@ export interface OrderDetail {
   customerName: string | null;
   status: OrderStatus;
   totalAmount: number;
+  vatAmount: number;
+  invoiceNumber: number | null;
   currency: string;
   items: OrderLineItem[];
   payment: OrderPayment | null;
@@ -459,6 +498,7 @@ export interface PosSaleCustomer {
 export interface PosSaleResult {
   orderId: string;
   totalAmount: number;
+  vatAmount: number;
   currency: string;
   paymentReference: string;
   lineItems: OrderLineItem[];
@@ -472,6 +512,7 @@ export interface PosSaleResult {
 export interface QuotationResult {
   orderId: string;
   totalAmount: number;
+  vatAmount: number;
   currency: string;
   lineItems: OrderLineItem[];
   customerId: string;
