@@ -71,7 +71,7 @@ public static class AuthEndpoints
         {
             // Pre-tenant lookup: which business this belongs to is exactly what we're resolving.
             var user = await db.BusinessUsers.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == request.Email, ct);
-            if (user is null)
+            if (user is null || !user.IsActive)
             {
                 return Results.Unauthorized();
             }

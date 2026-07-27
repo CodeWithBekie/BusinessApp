@@ -28,7 +28,7 @@ public static class DashboardEndpoints
             business.IsPubliclyListed = request.IsPubliclyListed;
             await db.SaveChangesAsync(ct);
             return Results.Ok(new BusinessVisibilityRequest(business.IsPubliclyListed));
-        });
+        }).RequireAuthorization("Permission:ManageBusinessSettings");
 
         // Fiscal-invoice/VAT settings — the owner fills these in themselves (Section: ZIMRA-style
         // invoice redesign). VatRate defaults to 0 on every business and only changes what's
@@ -40,7 +40,7 @@ public static class DashboardEndpoints
             return Results.Ok(new BusinessDetailsResponse(
                 business.Name, business.Tin, business.VatNumber, business.Address, business.Email, business.Phone,
                 business.VatRate, business.DeviceSerialNumber, business.FiscalDeviceId));
-        });
+        }).RequireAuthorization("Permission:ManageBusinessSettings");
 
         api.MapPatch("/business", async (
             UpdateBusinessDetailsRequest request, AiBusinessPlatformDbContext db, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
@@ -66,7 +66,7 @@ public static class DashboardEndpoints
             return Results.Ok(new BusinessDetailsResponse(
                 business.Name, business.Tin, business.VatNumber, business.Address, business.Email, business.Phone,
                 business.VatRate, business.DeviceSerialNumber, business.FiscalDeviceId));
-        });
+        }).RequireAuthorization("Permission:ManageBusinessSettings");
 
         // FR15 (Section 6.3) — thin mapping over ICatalogTools, the same functions the MCP
         // server's list_catalog_items/create_catalog_item/update_catalog_item tools call
@@ -88,7 +88,7 @@ public static class DashboardEndpoints
             {
                 return Results.BadRequest(ex.Message);
             }
-        });
+        }).RequireAuthorization("Permission:ManageCatalog");
 
         api.MapPatch("/catalog/{id:guid}", async (
             Guid id, UpdateCatalogItemRequest request, ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
@@ -108,7 +108,7 @@ public static class DashboardEndpoints
             {
                 return Results.NotFound();
             }
-        });
+        }).RequireAuthorization("Permission:ManageCatalog");
 
         var allowedImageContentTypes = new HashSet<string> { "image/jpeg", "image/png", "image/webp" };
         const long maxImageBytes = 5 * 1024 * 1024;
@@ -141,7 +141,7 @@ public static class DashboardEndpoints
             {
                 return Results.NotFound();
             }
-        }).DisableAntiforgery();
+        }).RequireAuthorization("Permission:ManageCatalog").DisableAntiforgery();
 
         api.MapDelete("/catalog/{id:guid}/image", async (
             Guid id, ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
@@ -155,7 +155,7 @@ public static class DashboardEndpoints
             {
                 return Results.NotFound();
             }
-        });
+        }).RequireAuthorization("Permission:ManageCatalog");
 
         // Anonymous and outside the tenant-filtered ICatalogTools path on purpose — an <Image> tag
         // (native or web) can't attach an Authorization header, so this is served like a public
@@ -210,7 +210,7 @@ public static class DashboardEndpoints
             {
                 return Results.BadRequest(ex.Message);
             }
-        });
+        }).RequireAuthorization("Permission:ManageOrders");
 
         // Manually records/finalizes payment for an order that isn't Paid yet (cash, bank transfer,
         // etc. collected outside the automated gateway) — thin mapping over
@@ -232,7 +232,7 @@ public static class DashboardEndpoints
             {
                 return Results.BadRequest(ex.Message);
             }
-        });
+        }).RequireAuthorization("Permission:ManageOrders");
 
         // Corrects the payment method on an order's already-confirmed payment — thin mapping over
         // IOrderTools.UpdatePaymentProviderAsync, the same function the MCP server's
@@ -249,7 +249,7 @@ public static class DashboardEndpoints
             {
                 return Results.BadRequest(ex.Message);
             }
-        });
+        }).RequireAuthorization("Permission:ManageOrders");
 
         // Point of Sale — records an in-person/walk-in sale that's already been paid for, thin
         // mapping over IOrderTools.RecordPosSaleAsync (the same function the MCP server's
@@ -269,7 +269,7 @@ public static class DashboardEndpoints
             {
                 return Results.BadRequest(ex.Message);
             }
-        });
+        }).RequireAuthorization("Permission:ManageOrders");
 
         // Converts a customer's open quotation (Quoted order) into an Invoiced order with a
         // pending payment record — thin mapping over IOrderTools.CreateInvoiceAsync, the same
@@ -287,7 +287,7 @@ public static class DashboardEndpoints
             {
                 return Results.BadRequest(ex.Message);
             }
-        });
+        }).RequireAuthorization("Permission:ManageOrders");
 
         // Creates a quotation (Quoted order, no payment yet) from multiple catalog items — thin
         // mapping over IOrderTools.CreateQuotationAsync, the same function the MCP server's
@@ -306,7 +306,7 @@ public static class DashboardEndpoints
             {
                 return Results.BadRequest(ex.Message);
             }
-        });
+        }).RequireAuthorization("Permission:ManageOrders");
 
         // Printable/downloadable PDF receipt for any order (POS sale, invoice, etc). Not exposed
         // as an MCP tool — MCP tools return JSON, not files — so the Assistant points the user at
@@ -354,7 +354,7 @@ public static class DashboardEndpoints
             {
                 return Results.BadRequest(ex.Message);
             }
-        });
+        }).RequireAuthorization("Permission:ViewAccounting");
 
         // New ground, not a spec section — supplier records + purchase orders to restock from
         // them, the "buying stock in" counterpart to the customer-facing order/POS model. Thin
@@ -377,7 +377,7 @@ public static class DashboardEndpoints
             {
                 return Results.BadRequest(ex.Message);
             }
-        });
+        }).RequireAuthorization("Permission:ManageSuppliers");
 
         api.MapPatch("/suppliers/{id:guid}", async (
             Guid id, UpdateSupplierRequest request, ISupplierTools supplierTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
@@ -396,7 +396,7 @@ public static class DashboardEndpoints
             {
                 return Results.NotFound(ex.Message);
             }
-        });
+        }).RequireAuthorization("Permission:ManageSuppliers");
 
         api.MapGet("/purchase-orders", async (string? status, IPurchaseOrderTools purchaseOrderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
         {
@@ -429,7 +429,7 @@ public static class DashboardEndpoints
             {
                 return Results.BadRequest(ex.Message);
             }
-        });
+        }).RequireAuthorization("Permission:ManageSuppliers");
 
         api.MapPost("/purchase-orders/{id:guid}/receive", async (
             Guid id, ReceivePurchaseOrderRequest? request, IPurchaseOrderTools purchaseOrderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
@@ -443,7 +443,7 @@ public static class DashboardEndpoints
             {
                 return Results.BadRequest(ex.Message);
             }
-        });
+        }).RequireAuthorization("Permission:ManageSuppliers");
 
         // Printable/downloadable PDF for a supplier purchase order — same shared document layout
         // as the order receipt above.
@@ -526,7 +526,7 @@ public static class DashboardEndpoints
             }
 
             return Results.Ok(decision);
-        });
+        }).RequireAuthorization("Permission:DecideApprovals");
 
         // Section 10.6/12.3 — document upload for RAG. Plain-text body only this pass, no
         // file/PDF upload parsing.
@@ -540,7 +540,7 @@ public static class DashboardEndpoints
 
             var result = await ragTools.IngestDocumentAsync(tenantProvider.CurrentBusinessId, request.Title, request.SourceType ?? "text", request.Content, ct);
             return Results.Ok(result);
-        });
+        }).RequireAuthorization("Permission:ManageBusinessSettings");
 
         // Section 12.3/19 — stand-in for Meta's real embedded-signup/OAuth onboarding flow: the
         // operator pastes in values obtained directly from Meta's own dashboard. Status is set to
@@ -575,7 +575,7 @@ public static class DashboardEndpoints
 
             await db.SaveChangesAsync(ct);
             return Results.Ok(connection);
-        });
+        }).RequireAuthorization("Permission:ManageBusinessSettings");
 
         // Section 13.2 — connects the business's own Paynow merchant integration. Mirrors
         // /whatsapp/connect exactly: a business has at most one PaynowConnection, so this is
@@ -608,7 +608,7 @@ public static class DashboardEndpoints
 
             await db.SaveChangesAsync(ct);
             return Results.Ok(connection);
-        });
+        }).RequireAuthorization("Permission:ManageBusinessSettings");
 
         // Proof-of-wiring (Section 10.7): the exact same IHealthTool implementation the Mcp
         // project exposes as an MCP tool, called in-process here.

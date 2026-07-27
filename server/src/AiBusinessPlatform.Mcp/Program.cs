@@ -1,4 +1,5 @@
 using AiBusinessPlatform.Application.Abstractions;
+using AiBusinessPlatform.Application.Auth;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Infrastructure.AI;
 using AiBusinessPlatform.Infrastructure.Auth;
@@ -26,6 +27,8 @@ builder.Services.AddPlatformJwtAuthentication(builder.Configuration);
 builder.Services.AddScoped<HttpBusinessIdTenantProvider>();
 builder.Services.AddScoped<ICurrentTenantProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
 builder.Services.AddScoped<ICurrentUserProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
+builder.Services.AddScoped<ICurrentUserRoleProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
+builder.Services.AddScoped<IPermissionChecker, PermissionChecker>();
 
 builder.Services.AddScoped<IHealthTool, HealthTool>();
 builder.Services.AddScoped<ICatalogTools, CatalogTools>();

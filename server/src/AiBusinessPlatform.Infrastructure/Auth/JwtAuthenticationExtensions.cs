@@ -1,5 +1,7 @@
 using System.Text;
+using AiBusinessPlatform.Application.Auth;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -47,10 +49,21 @@ public static class JwtAuthenticationExtensions
         // route, or vice versa) into a clean 403 at the framework level, rather than relying on
         // every endpoint author to manually check ICurrentCustomerProvider/ICurrentTenantProvider
         // for null/throw.
+        services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
+
         services.AddAuthorization(options =>
         {
             options.AddPolicy("CustomerOnly", policy => policy.RequireClaim("customer_account_id"));
             options.AddPolicy("BusinessOnly", policy => policy.RequireClaim("business_id"));
+
+            // One policy per Permission — endpoints/tool gates opt in via
+            // .RequireAuthorization("BusinessOnly", $"Permission:{permission}"); both policy
+            // names must pass (AND), so a permission failure never accidentally also grants
+            // cross-tenant/customer access.
+            foreach (var permission in Enum.GetValues<Permission>())
+            {
+                options.AddPolicy($"Permission:{permission}", policy => policy.Requirements.Add(new PermissionRequirement(permission)));
+            }
         });
 
         return services;

@@ -2,7 +2,7 @@ namespace AiBusinessPlatform.Domain;
 
 public enum BusinessStatus { Active, Suspended }
 
-public enum BusinessUserRole { Owner, Admin, Staff }
+public enum BusinessUserRole { Owner, Manager, Cashier, InventoryClerk, Accountant }
 
 public enum CatalogItemType { Stock, TimeBased, Quote }
 

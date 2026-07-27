@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using AiBusinessPlatform.Application.Abstractions;
+using AiBusinessPlatform.Application.Auth;
 using AiBusinessPlatform.Application.Tools;
 using Microsoft.Extensions.AI;
 using ModelContextProtocol.Server;
@@ -10,13 +11,17 @@ namespace AiBusinessPlatform.Mcp.Tools;
 // McpServer.SampleAsync, rather than this server needing its own separate LLM client/API key.
 // Never sends directly: the draft is persisted as a PendingApproval (ApprovalActionTypes.
 // SendCustomerMessage) and only actually reaches WhatsApp once a human approves it — same
-// human-in-the-loop principle Section 10.5 already applies to cancel_paid_order.
+// human-in-the-loop principle Section 10.5 already applies to cancel_paid_order. Gated behind
+// Permission.ManageOrders (customer messaging is order/service-adjacent staff work) — see
+// OrderMcpTools' remarks.
 [McpServerToolType]
-public class CustomerMessagingMcpTools(ICustomerTools customerTools, IMessagingTools messagingTools, ICurrentTenantProvider tenantProvider)
+public class CustomerMessagingMcpTools(ICustomerTools customerTools, IMessagingTools messagingTools, ICurrentTenantProvider tenantProvider, IPermissionChecker permissionChecker)
 {
     [McpServerTool(Name = "draft_customer_message"), Description("Drafts a WhatsApp message to a customer using the connected AI model's own language ability, for the owner to review before it sends. NEVER sends automatically — creates a pending approval (viewable in the Approvals tab, or decided via decide_approval) that must be approved before the message actually reaches the customer. Use for order updates, replies to a complaint, payment reminders, etc. Resolve customerId via list_customers first — never guess an id.")]
     public async Task<DraftedMessageResult> DraftCustomerMessage(Guid customerId, string intent, McpServer server, CancellationToken cancellationToken = default)
     {
+        permissionChecker.EnsurePermission(Permission.ManageOrders);
+
         var businessId = tenantProvider.CurrentBusinessId;
         var customer = await customerTools.GetCustomerAsync(businessId, customerId, cancellationToken);
 

@@ -7,6 +7,7 @@ import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { CATALOG_ITEM_TYPE_COLORS, CATALOG_ITEM_TYPE_LABELS, formatMoney } from '@/src/catalog/catalogItemType';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
+import { useHasPermission } from '@/src/auth/permissions';
 
 type FilterValue = 'All' | 'Active' | 'Inactive';
 
@@ -38,10 +39,10 @@ function CatalogThumbnail({ item }: { item: CatalogItem }) {
   );
 }
 
-function CatalogCard({ item, onPress }: { item: CatalogItem; onPress: () => void }) {
+function CatalogCard({ item, onPress }: { item: CatalogItem; onPress?: () => void }) {
   const colorScheme = useColorScheme();
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
+    <Pressable onPress={onPress} disabled={!onPress} style={({ pressed }) => [styles.card, pressed && onPress && styles.cardPressed]}>
       <View style={[styles.cardInner, !item.active && styles.cardInactive]} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
         <CatalogThumbnail item={item} />
         <View style={styles.cardContent} lightColor="transparent" darkColor="transparent">
@@ -83,6 +84,7 @@ function FilterTabs({ value, onChange }: { value: FilterValue; onChange: (value:
 
 export default function CatalogScreen() {
   const router = useRouter();
+  const canManageCatalog = useHasPermission('ManageCatalog');
   const [filter, setFilter] = useState<FilterValue>('Active');
   const fetchCatalog = useCallback(() => apiClient.getCatalog(), []);
   const { data: items, error, refreshing, isFromCache, reload: load } = useCachedFetch<CatalogItem[]>('catalog', fetchCatalog);
@@ -103,12 +105,14 @@ export default function CatalogScreen() {
     <View style={styles.container}>
       <View style={styles.headerRow} lightColor="transparent" darkColor="transparent">
         <Text style={styles.title}>Catalog</Text>
-        <Pressable
-          style={styles.addButton}
-          onPress={() => router.push({ pathname: '/catalog-item/[id]', params: { id: 'new' } })}
-        >
-          <Text style={styles.addButtonText}>+ Add item</Text>
-        </Pressable>
+        {canManageCatalog && (
+          <Pressable
+            style={styles.addButton}
+            onPress={() => router.push({ pathname: '/catalog-item/[id]', params: { id: 'new' } })}
+          >
+            <Text style={styles.addButtonText}>+ Add item</Text>
+          </Pressable>
+        )}
       </View>
       <FilterTabs value={filter} onChange={setFilter} />
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
@@ -124,7 +128,10 @@ export default function CatalogScreen() {
           data={visibleItems}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <CatalogCard item={item} onPress={() => router.push({ pathname: '/catalog-item/[id]', params: { id: item.id } })} />
+            <CatalogCard
+              item={item}
+              onPress={canManageCatalog ? () => router.push({ pathname: '/catalog-item/[id]', params: { id: item.id } }) : undefined}
+            />
           )}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
         />

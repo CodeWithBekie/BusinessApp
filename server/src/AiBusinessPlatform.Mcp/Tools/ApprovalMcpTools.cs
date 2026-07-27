@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using AiBusinessPlatform.Application.Abstractions;
+using AiBusinessPlatform.Application.Auth;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Domain;
 using ModelContextProtocol.Server;
@@ -17,7 +18,7 @@ namespace AiBusinessPlatform.Mcp.Tools;
 [McpServerToolType]
 public class ApprovalMcpTools(
     IApprovalTools approvalTools, IOrderTools orderTools, IMessagingTools messagingTools,
-    ICurrentTenantProvider tenantProvider, ICurrentUserProvider userProvider)
+    ICurrentTenantProvider tenantProvider, ICurrentUserProvider userProvider, IPermissionChecker permissionChecker)
 {
     // Nullable parameters need an explicit `= null` default — see CatalogMcpTools' remarks.
     [McpServerTool(Name = "list_pending_approvals"), Description("Lists this business's pending-approval requests, most recent first, optionally filtered to one status: \"Pending\", \"Approved\", or \"Rejected\".")]
@@ -27,6 +28,8 @@ public class ApprovalMcpTools(
     [McpServerTool(Name = "decide_approval"), Description("Approves or rejects a pending-approval request. Only call this when the owner has clearly and explicitly stated their decision — if it's ambiguous which request they mean or what they decided, ask a clarifying question instead of calling this.")]
     public async Task<ApprovalDecisionResult> DecideApproval(Guid pendingApprovalId, bool approve, CancellationToken cancellationToken = default)
     {
+        permissionChecker.EnsurePermission(Permission.DecideApprovals);
+
         var businessId = tenantProvider.CurrentBusinessId;
         var decidedBy = userProvider.CurrentUserId;
 

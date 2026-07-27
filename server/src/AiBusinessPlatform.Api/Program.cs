@@ -3,6 +3,7 @@ using AiBusinessPlatform.Api.Endpoints;
 using AiBusinessPlatform.Api.Orchestrator;
 using AiBusinessPlatform.Api.Payments;
 using AiBusinessPlatform.Application.Abstractions;
+using AiBusinessPlatform.Application.Auth;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Domain.Entities;
 using AiBusinessPlatform.Infrastructure.AI;
@@ -77,7 +78,9 @@ builder.Services.AddScoped<HttpBusinessIdTenantProvider>();
 builder.Services.AddScoped<ICurrentTenantProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
 builder.Services.AddScoped<ICurrentTenantSetter>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
 builder.Services.AddScoped<ICurrentUserProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
+builder.Services.AddScoped<ICurrentUserRoleProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
 builder.Services.AddScoped<ICurrentCustomerProvider, HttpCustomerAccountProvider>();
+builder.Services.AddScoped<IPermissionChecker, PermissionChecker>();
 
 // Section 15 — JWT auth. PasswordHasher<BusinessUser> + a hand-issued JWT satisfy "ASP.NET Core
 // Identity or an equivalent" without adopting full Identity's UserManager/table scaffolding.
@@ -101,6 +104,7 @@ builder.Services.AddScoped<IPurchaseOrderTools, PurchaseOrderTools>();
 builder.Services.AddScoped<IMarketplaceTools, MarketplaceTools>();
 builder.Services.AddScoped<IDocumentGenerationTools, DocumentGenerationTools>();
 builder.Services.AddScoped<IMessagingTools, MessagingTools>();
+builder.Services.AddScoped<IStaffTools, StaffTools>();
 
 // Section 10.2 — where the Assistant chat endpoint finds the platform's own MCP server (it
 // connects as a real MCP client, forwarding the caller's own bearer token).
@@ -183,6 +187,7 @@ app.MapAuthEndpoints();
 app.MapCustomerAuthEndpoints();
 app.MapWebhookEndpoints();
 app.MapDashboardEndpoints();
+app.MapStaffEndpoints();
 app.MapMarketplaceEndpoints();
 app.MapAssistantEndpoints();
 

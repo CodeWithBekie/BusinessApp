@@ -6,6 +6,7 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 import { OfflineBanner } from '@/src/offline/OfflineBanner';
+import { useHasPermission } from '@/src/auth/permissions';
 
 type TabIconName = 'cart' | 'list.bullet' | 'chart.bar' | 'checkmark.seal' | 'bubble.left.and.bubble.right' | 'gearshape' | 'shippingbox';
 
@@ -15,6 +16,13 @@ function TabIcon({ name, color }: { name: TabIconName; color: ColorValue }) {
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+
+  // Suppliers/Sales/Approvals are hidden from roles without the matching permission (Cashier,
+  // InventoryClerk, Accountant each see a subset) — `href: null` removes a tab from the bar
+  // without unmounting its route, the documented expo-router pattern for conditional tabs.
+  const canManageSuppliers = useHasPermission('ManageSuppliers');
+  const canViewAccounting = useHasPermission('ViewAccounting');
+  const canDecideApprovals = useHasPermission('DecideApprovals');
 
   return (
     <View style={{ flex: 1 }}>
@@ -27,9 +35,18 @@ export default function TabLayout() {
         }}>
         <Tabs.Screen name="index" options={{ title: 'Catalog', tabBarIcon: ({ color }) => <TabIcon name="cart" color={color} /> }} />
         <Tabs.Screen name="orders" options={{ title: 'Orders', tabBarIcon: ({ color }) => <TabIcon name="list.bullet" color={color} /> }} />
-        <Tabs.Screen name="suppliers" options={{ title: 'Suppliers', tabBarIcon: ({ color }) => <TabIcon name="shippingbox" color={color} /> }} />
-        <Tabs.Screen name="sales" options={{ title: 'Sales', tabBarIcon: ({ color }) => <TabIcon name="chart.bar" color={color} /> }} />
-        <Tabs.Screen name="approvals" options={{ title: 'Approvals', tabBarIcon: ({ color }) => <TabIcon name="checkmark.seal" color={color} /> }} />
+        <Tabs.Screen
+          name="suppliers"
+          options={{ title: 'Suppliers', tabBarIcon: ({ color }) => <TabIcon name="shippingbox" color={color} />, href: canManageSuppliers ? undefined : null }}
+        />
+        <Tabs.Screen
+          name="sales"
+          options={{ title: 'Sales', tabBarIcon: ({ color }) => <TabIcon name="chart.bar" color={color} />, href: canViewAccounting ? undefined : null }}
+        />
+        <Tabs.Screen
+          name="approvals"
+          options={{ title: 'Approvals', tabBarIcon: ({ color }) => <TabIcon name="checkmark.seal" color={color} />, href: canDecideApprovals ? undefined : null }}
+        />
         <Tabs.Screen name="assistant" options={{ title: 'Assistant', tabBarIcon: ({ color }) => <TabIcon name="bubble.left.and.bubble.right" color={color} /> }} />
         <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: ({ color }) => <TabIcon name="gearshape" color={color} /> }} />
       </Tabs>

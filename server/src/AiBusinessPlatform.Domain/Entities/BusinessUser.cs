@@ -7,6 +7,7 @@ public class BusinessUser : ITenantScoped
     public string Name { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
-    public BusinessUserRole Role { get; set; } = BusinessUserRole.Staff;
+    public BusinessUserRole Role { get; set; } = BusinessUserRole.Cashier;
+    public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; }
 }

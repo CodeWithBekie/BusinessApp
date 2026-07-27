@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, TextInput } from 'react-native';
 
-import { apiClient } from '@/src/api/client';
+import { apiClient, BusinessUserRole, StaffSummary } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAuth } from '@/src/auth/AuthContext';
 import { useIsOnline } from '@/src/offline/networkStatus';
+import { useHasPermission } from '@/src/auth/permissions';
 
 // Section 12.3/19 — stand-in for Meta's real embedded-signup/OAuth flow: the owner pastes in
 // values obtained directly from their Meta dashboard. See WhatsAppOptions/WhatsAppConnectRequest
@@ -322,6 +323,137 @@ function BusinessDetailsForm() {
   );
 }
 
+const INVITABLE_ROLES: readonly { value: BusinessUserRole; label: string }[] = [
+  { value: 'Manager', label: 'Manager' },
+  { value: 'Cashier', label: 'Cashier' },
+  { value: 'InventoryClerk', label: 'Inventory Clerk' },
+  { value: 'Accountant', label: 'Accountant' },
+];
+
+const ROLE_LABELS: Record<BusinessUserRole, string> = {
+  Owner: 'Owner',
+  Manager: 'Manager',
+  Cashier: 'Cashier',
+  InventoryClerk: 'Inventory Clerk',
+  Accountant: 'Accountant',
+};
+
+// Owner-only staff roster (Permission.ManageStaff) — no invite-email flow exists in this codebase
+// (WhatsApp/Paynow connections above are also pasted-in manually), so the Owner sets the new staff
+// member's initial password directly, same as StaffTools.InviteStaffAsync on the server.
+function StaffManagementForm() {
+  const inputStyle = useInputStyle();
+  const isOnline = useIsOnline();
+  const { session } = useAuth();
+  const currentUserId = session?.kind === 'business' ? session.businessUserId : null;
+
+  const [staff, setStaff] = useState<StaffSummary[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<BusinessUserRole>('Cashier');
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+
+  const loadStaff = () => {
+    apiClient
+      .getStaff()
+      .then(setStaff)
+      .catch((err) => setListError((err as Error).message));
+  };
+
+  useEffect(loadStaff, []);
+
+  const invite = async () => {
+    setInviteError(null);
+    if (!name.trim() || !email.trim() || !password.trim()) {
+      setInviteError('Name, email, and password are all required.');
+      return;
+    }
+    setInviting(true);
+    try {
+      await apiClient.inviteStaff({ name: name.trim(), email: email.trim(), password, role });
+      setName('');
+      setEmail('');
+      setPassword('');
+      setRole('Cashier');
+      loadStaff();
+    } catch (err) {
+      setInviteError((err as Error).message);
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const toggleActive = async (member: StaffSummary) => {
+    setUpdatingId(member.id);
+    try {
+      await apiClient.updateStaff(member.id, { isActive: !member.isActive });
+      loadStaff();
+    } catch (err) {
+      setListError((err as Error).message);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  return (
+    <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+      <Text style={styles.cardTitle}>Staff</Text>
+      <Text style={styles.cardSubtitle}>Invite employees and manage their role. Deactivating blocks their next login.</Text>
+
+      {listError && <Text style={styles.error}>{listError}</Text>}
+      {staff?.map((member) => (
+        <View key={member.id} style={styles.staffRow} lightColor="transparent" darkColor="transparent">
+          <View style={styles.staffInfo} lightColor="transparent" darkColor="transparent">
+            <Text style={styles.staffName} numberOfLines={1}>
+              {member.name}
+              {member.id === currentUserId ? ' (you)' : ''}
+            </Text>
+            <Text style={styles.staffMeta}>
+              {member.email} · {ROLE_LABELS[member.role]}
+              {!member.isActive ? ' · Deactivated' : ''}
+            </Text>
+          </View>
+          {member.id !== currentUserId && (
+            <Pressable
+              style={[styles.staffToggleButton, (updatingId === member.id || !isOnline) && styles.buttonDisabled]}
+              disabled={updatingId === member.id || !isOnline}
+              onPress={() => toggleActive(member)}
+            >
+              <Text style={styles.staffToggleButtonText}>{member.isActive ? 'Deactivate' : 'Reactivate'}</Text>
+            </Pressable>
+          )}
+        </View>
+      ))}
+
+      <Text style={[styles.cardSubtitle, styles.staffInviteHeading]}>Invite staff</Text>
+      <TextInput style={inputStyle} placeholder="Name" value={name} onChangeText={setName} />
+      <TextInput style={inputStyle} placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+      <TextInput style={inputStyle} placeholder="Temporary password" value={password} onChangeText={setPassword} secureTextEntry />
+      <View style={styles.roleRow} lightColor="transparent" darkColor="transparent">
+        {INVITABLE_ROLES.map((option) => {
+          const active = option.value === role;
+          return (
+            <Pressable key={option.value} onPress={() => setRole(option.value)} style={[styles.roleChip, active && styles.roleChipActive]}>
+              <Text style={[styles.roleChipText, active && styles.roleChipTextActive]}>{option.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Pressable style={[styles.button, (inviting || !isOnline) && styles.buttonDisabled]} disabled={inviting || !isOnline} onPress={invite}>
+        <Text style={styles.buttonText}>{inviting ? 'Inviting…' : 'Invite staff member'}</Text>
+      </Pressable>
+      {inviteError && <Text style={styles.error}>{inviteError}</Text>}
+      {!isOnline && <Text style={styles.error}>You're offline — connect to manage staff.</Text>}
+    </View>
+  );
+}
+
 function useInputStyle() {
   const colorScheme = useColorScheme();
   return [styles.input, colorScheme === 'dark' ? styles.inputDark : styles.inputLight];
@@ -329,16 +461,23 @@ function useInputStyle() {
 
 export default function SettingsScreen() {
   const auth = useAuth();
+  const canManageBusinessSettings = useHasPermission('ManageBusinessSettings');
+  const canManageStaff = useHasPermission('ManageStaff');
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Settings</Text>
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
-      <BusinessVisibilityForm />
-      <BusinessDetailsForm />
-      <WhatsAppConnectForm />
-      <PaynowConnectForm />
-      <DocumentUploadForm />
+      {canManageStaff && <StaffManagementForm />}
+      {canManageBusinessSettings && (
+        <>
+          <BusinessVisibilityForm />
+          <BusinessDetailsForm />
+          <WhatsAppConnectForm />
+          <PaynowConnectForm />
+          <DocumentUploadForm />
+        </>
+      )}
       <Pressable style={styles.logoutButton} onPress={auth.logout}>
         <Text style={styles.logoutButtonText}>Log out</Text>
       </Pressable>
@@ -374,4 +513,24 @@ const styles = StyleSheet.create({
   success: { color: '#2e7d32', marginTop: 8 },
   logoutButton: { borderWidth: 1, borderColor: '#c0392b', paddingVertical: 10, borderRadius: 6, alignItems: 'center', marginBottom: 32 },
   logoutButtonText: { color: '#c0392b', fontWeight: '600' },
+  staffRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  staffInfo: { flexShrink: 1 },
+  staffName: { fontSize: 14, fontWeight: '600' },
+  staffMeta: { fontSize: 12, opacity: 0.6, marginTop: 2 },
+  staffToggleButton: { borderWidth: 1, borderColor: '#c0392b', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
+  staffToggleButtonText: { color: '#c0392b', fontSize: 12, fontWeight: '600' },
+  staffInviteHeading: { marginTop: 12, marginBottom: 8 },
+  roleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  roleChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#ccc' },
+  roleChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
+  roleChipText: { fontSize: 12, fontWeight: '600', opacity: 0.7 },
+  roleChipTextActive: { color: '#fff', opacity: 1 },
 });

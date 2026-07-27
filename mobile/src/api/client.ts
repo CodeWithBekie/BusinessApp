@@ -305,6 +305,11 @@ export const apiClient = {
       body: JSON.stringify({ items }),
     }),
   getMyMarketplaceOrders: () => request<MarketplaceOrderSummary[]>('/api/marketplace/my-orders'),
+
+  getStaff: () => request<StaffSummary[]>('/api/staff'),
+  inviteStaff: (input: InviteStaffInput) => request<StaffSummary>('/api/staff', { method: 'POST', body: JSON.stringify(input) }),
+  updateStaff: (id: string, input: UpdateStaffInput) =>
+    request<StaffSummary>(`/api/staff/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
 };
 
 export interface AuthResponse {
@@ -352,6 +357,29 @@ export interface MarketplaceOrderSummary {
   itemCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export type BusinessUserRole = 'Owner' | 'Manager' | 'Cashier' | 'InventoryClerk' | 'Accountant';
+
+export interface StaffSummary {
+  id: string;
+  name: string;
+  email: string;
+  role: BusinessUserRole;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface InviteStaffInput {
+  name: string;
+  email: string;
+  password: string;
+  role: BusinessUserRole;
+}
+
+export interface UpdateStaffInput {
+  role?: BusinessUserRole;
+  isActive?: boolean;
 }
 
 export interface BusinessDetails {

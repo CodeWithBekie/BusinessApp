@@ -8,6 +8,7 @@ import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { formatMoney } from '@/src/common/format';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
+import { useHasPermission } from '@/src/auth/permissions';
 
 type FilterValue = SalesRange | 'custom';
 
@@ -144,6 +145,7 @@ function TrendChart({ trend }: { trend: SalesSummary['trend'] }) {
 export default function SalesScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
+  const canManageOrders = useHasPermission('ManageOrders');
   const [filter, setFilter] = useState<FilterValue>('30d');
   const [fromDate, setFromDate] = useState<Date | null>(null);
   const [toDate, setToDate] = useState<Date | null>(null);
@@ -194,9 +196,11 @@ export default function SalesScreen() {
     >
       <View style={styles.headerRow} lightColor="transparent" darkColor="transparent">
         <Text style={styles.title}>Sales</Text>
-        <Pressable style={styles.saleButton} onPress={() => router.push('/pos')}>
-          <Text style={styles.saleButtonText}>+ New sale</Text>
-        </Pressable>
+        {canManageOrders && (
+          <Pressable style={styles.saleButton} onPress={() => router.push('/pos')}>
+            <Text style={styles.saleButtonText}>+ New sale</Text>
+          </Pressable>
+        )}
       </View>
       <RangeTabs value={filter} onChange={setFilter} />
 

@@ -1,4 +1,6 @@
+using System.Security.Claims;
 using AiBusinessPlatform.Application.Abstractions;
+using AiBusinessPlatform.Domain;
 using Microsoft.AspNetCore.Http;
 
 namespace AiBusinessPlatform.Infrastructure.Auth;
@@ -11,7 +13,7 @@ namespace AiBusinessPlatform.Infrastructure.Auth;
 // registrations, or a background consumer's SetBusinessId call would land on a different instance
 // than the one CurrentBusinessId is later read from.
 public class HttpBusinessIdTenantProvider(IHttpContextAccessor httpContextAccessor)
-    : ICurrentTenantProvider, ICurrentTenantSetter, ICurrentUserProvider
+    : ICurrentTenantProvider, ICurrentTenantSetter, ICurrentUserProvider, ICurrentUserRoleProvider
 {
     private Guid? _explicitBusinessId;
 
@@ -43,6 +45,15 @@ public class HttpBusinessIdTenantProvider(IHttpContextAccessor httpContextAccess
         {
             var claim = httpContextAccessor.HttpContext?.User.FindFirst("sub")?.Value;
             return Guid.TryParse(claim, out var userId) ? userId : null;
+        }
+    }
+
+    public BusinessUserRole? CurrentUserRole
+    {
+        get
+        {
+            var claim = httpContextAccessor.HttpContext?.User.FindFirst(ClaimTypes.Role)?.Value;
+            return Enum.TryParse<BusinessUserRole>(claim, out var role) ? role : null;
         }
     }
 

@@ -9,6 +9,7 @@ import { APPROVAL_STATUS_COLORS, APPROVAL_STATUS_FILTERS, ApprovalStatus } from 
 import { formatRelativeDate } from '@/src/common/format';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
 import { useIsOnline } from '@/src/offline/networkStatus';
+import { useHasPermission } from '@/src/auth/permissions';
 
 type FilterValue = ApprovalStatus | 'All';
 type Decision = 'approve' | 'reject';
@@ -78,6 +79,7 @@ function FilterTabs({ value, onChange }: { value: FilterValue; onChange: (value:
 export default function ApprovalsScreen() {
   const colorScheme = useColorScheme();
   const isOnline = useIsOnline();
+  const canDecideApprovals = useHasPermission('DecideApprovals');
   const [filter, setFilter] = useState<FilterValue>('Pending');
   const fetchApprovals = useCallback(() => apiClient.getApprovals(), []);
   const { data: items, error, refreshing, isFromCache, reload: load } = useCachedFetch<PendingApproval[]>('approvals', fetchApprovals);
@@ -140,7 +142,7 @@ export default function ApprovalsScreen() {
                 Requested {formatRelativeDate(item.requestedAt)}
                 {item.decidedAt ? ` · Decided ${formatRelativeDate(item.decidedAt)}` : ''}
               </Text>
-              {item.status === 'Pending' && (
+              {item.status === 'Pending' && canDecideApprovals && (
                 <>
                   <View style={styles.actions} lightColor="transparent" darkColor="transparent">
                     <Pressable

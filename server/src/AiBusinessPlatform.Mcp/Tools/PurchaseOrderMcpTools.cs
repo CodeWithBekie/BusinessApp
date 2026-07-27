@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using AiBusinessPlatform.Application.Abstractions;
+using AiBusinessPlatform.Application.Auth;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Domain;
 using ModelContextProtocol.Server;
@@ -8,9 +9,10 @@ namespace AiBusinessPlatform.Mcp.Tools;
 
 // The same IPurchaseOrderTools the dashboard's Purchase Orders screen calls, exposed here so the
 // Assistant can restock from a supplier, or mark a delivery as received, by natural language too
-// (Section 10.7's "one function, multiple entry points").
+// (Section 10.7's "one function, multiple entry points"). Mutating tools call
+// IPermissionChecker.EnsurePermission first — see OrderMcpTools' remarks.
 [McpServerToolType]
-public class PurchaseOrderMcpTools(IPurchaseOrderTools purchaseOrderTools, ICurrentTenantProvider tenantProvider)
+public class PurchaseOrderMcpTools(IPurchaseOrderTools purchaseOrderTools, ICurrentTenantProvider tenantProvider, IPermissionChecker permissionChecker)
 {
     // Nullable parameters need an explicit `= null` default — see CatalogMcpTools' remarks.
     [McpServerTool(Name = "list_purchase_orders"), Description("Lists this business's purchase orders to suppliers, most recent first, optionally filtered to one status: \"Draft\", \"Ordered\", \"Received\", or \"Cancelled\".")]
@@ -23,7 +25,10 @@ public class PurchaseOrderMcpTools(IPurchaseOrderTools purchaseOrderTools, ICurr
 
     [McpServerTool(Name = "create_purchase_order"), Description("Creates a purchase order to restock from a supplier: one or more line items with the quantity and unit cost being ordered. For each line, either set catalogItemId to restock an existing item (resolve it via list_catalog_items first — never guess an id), or leave catalogItemId null and supply newItemName + newItemType (\"Stock\", \"TimeBased\", or \"Quote\") to order a product that isn't in the catalog yet — it's added to the catalog once the order is received and a sale price is set. currency is only required when every line is a new item; otherwise it's inferred automatically and can be omitted. Does not change stock or the catalog yet — call receive_purchase_order once the goods actually arrive.")]
     public Task<PurchaseOrderDetail> CreatePurchaseOrder(Guid supplierId, IReadOnlyList<PurchaseOrderLineItem> items, string? currency = null, CancellationToken cancellationToken = default)
-        => purchaseOrderTools.CreatePurchaseOrderAsync(tenantProvider.CurrentBusinessId, supplierId, items, currency, cancellationToken);
+    {
+        permissionChecker.EnsurePermission(Permission.ManageSuppliers);
+        return purchaseOrderTools.CreatePurchaseOrderAsync(tenantProvider.CurrentBusinessId, supplierId, items, currency, cancellationToken);
+    }
 
     // linePrices is optional here (unlike the REST endpoint, which still requires a complete list
     // and throws otherwise — Part 2's design principle: elicitation is an MCP-only UX enhancement
@@ -34,6 +39,8 @@ public class PurchaseOrderMcpTools(IPurchaseOrderTools purchaseOrderTools, ICurr
     public async Task<PurchaseOrderDetail> ReceivePurchaseOrder(
         Guid purchaseOrderId, McpServer server, IReadOnlyList<ReceivedLinePrice>? linePrices = null, CancellationToken cancellationToken = default)
     {
+        permissionChecker.EnsurePermission(Permission.ManageSuppliers);
+
         var po = await purchaseOrderTools.GetPurchaseOrderAsync(tenantProvider.CurrentBusinessId, purchaseOrderId, cancellationToken);
         var effectivePrices = (linePrices ?? []).ToList();
 

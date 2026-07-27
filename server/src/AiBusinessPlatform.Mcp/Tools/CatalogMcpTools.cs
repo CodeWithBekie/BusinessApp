@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using AiBusinessPlatform.Application.Abstractions;
+using AiBusinessPlatform.Application.Auth;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Domain;
 using ModelContextProtocol.Server;
@@ -10,8 +11,9 @@ namespace AiBusinessPlatform.Mcp.Tools;
 // for external AI clients AND the in-app Assistant (which is itself an MCP client of this server,
 // Section 10.2). Reserve/release/finalize stock stay off this list — those are steps in the
 // customer-facing order flow, not something an owner-facing assistant should trigger directly.
+// Mutating tools call IPermissionChecker.EnsurePermission first — see OrderMcpTools' remarks.
 [McpServerToolType]
-public class CatalogMcpTools(ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider)
+public class CatalogMcpTools(ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider, IPermissionChecker permissionChecker)
 {
     [McpServerTool(Name = "check_catalog_availability"), Description("Finds catalog items matching a free-text query and returns price/stock availability.")]
     public Task<IReadOnlyList<CatalogAvailabilityMatch>> CheckAvailability(string itemQuery, CancellationToken cancellationToken)
@@ -26,9 +28,15 @@ public class CatalogMcpTools(ICatalogTools catalogTools, ICurrentTenantProvider 
 
     [McpServerTool(Name = "create_catalog_item"), Description("Creates a new catalog item. itemType must be \"Stock\", \"TimeBased\", or \"Quote\". currency defaults to USD, unit defaults to \"each\", stockQuantity only applies to Stock items. code is an optional SKU/item code shown on invoices. Only call this when the owner has clearly and explicitly asked to add a new item.")]
     public Task<CatalogItemSummary> CreateCatalogItem(string name, CatalogItemType itemType, decimal price, string? currency = null, int? stockQuantity = null, string? unit = null, string? code = null, CancellationToken cancellationToken = default)
-        => catalogTools.CreateCatalogItemAsync(tenantProvider.CurrentBusinessId, name, itemType, price, currency, stockQuantity, unit, code, cancellationToken);
+    {
+        permissionChecker.EnsurePermission(Permission.ManageCatalog);
+        return catalogTools.CreateCatalogItemAsync(tenantProvider.CurrentBusinessId, name, itemType, price, currency, stockQuantity, unit, code, cancellationToken);
+    }
 
     [McpServerTool(Name = "update_catalog_item"), Description("Edits an existing catalog item's name, price, currency, unit, stock quantity, code, and/or active status — only the fields provided are changed. Set active=false to deactivate an item, active=true to reactivate it. Only call this when the owner has clearly and explicitly asked for this change.")]
     public Task<CatalogItemSummary> UpdateCatalogItem(Guid itemId, string? name = null, decimal? price = null, string? currency = null, int? stockQuantity = null, string? unit = null, bool? active = null, string? code = null, CancellationToken cancellationToken = default)
-        => catalogTools.UpdateCatalogItemAsync(tenantProvider.CurrentBusinessId, itemId, name, price, currency, stockQuantity, unit, active, code, cancellationToken);
+    {
+        permissionChecker.EnsurePermission(Permission.ManageCatalog);
+        return catalogTools.UpdateCatalogItemAsync(tenantProvider.CurrentBusinessId, itemId, name, price, currency, stockQuantity, unit, active, code, cancellationToken);
+    }
 }
