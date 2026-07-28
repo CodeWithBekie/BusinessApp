@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, TextInput } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 import { useAuth } from '@/src/auth/AuthContext';
-import { styles, useInputStyle } from '@/src/auth/AuthScreen';
+import { styles, useInputStyle } from '@/src/auth/authFormStyles';
 
 // Sibling to the business login/signup form in AuthScreen.tsx — same visual shape, different
 // fields/identity (a marketplace CustomerAccount, not a BusinessUser). Kept as its own component

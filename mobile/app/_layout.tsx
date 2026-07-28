@@ -16,8 +16,10 @@ export {
 } from 'expo-router';
 
 export const unstable_settings = {
-  // Ensure that reloading on `/modal` keeps a back button present.
-  initialRouteName: '(tabs)',
+  // "index" (app/index.tsx) is the true first screen for "/" now — it immediately redirects to
+  // (tabs) or (customer) based on session, so reloading on e.g. `/modal` still has somewhere
+  // sensible to go back to.
+  initialRouteName: 'index',
 };
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -73,7 +75,11 @@ function RootLayoutNav() {
       {!session ? (
         <AuthScreen />
       ) : session.kind === 'business' ? (
-        <Stack>
+        // key forces React to fully remount the navigator (rather than reconciling it in place)
+        // when switching between the business/customer Stacks below, since both branches use the
+        // same `Stack` component type at the same tree position.
+        <Stack key="business">
+          <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
           <Stack.Screen name="order/[id]" options={{ title: 'Order' }} />
@@ -84,7 +90,8 @@ function RootLayoutNav() {
           <Stack.Screen name="purchase-order/[id]" options={{ title: 'Purchase order' }} />
         </Stack>
       ) : (
-        <Stack>
+        <Stack key="customer">
+          <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="(customer)" options={{ headerShown: false }} />
           <Stack.Screen name="business/[id]" options={{ title: 'Storefront' }} />
           <Stack.Screen name="checkout" options={{ title: 'Checkout', presentation: 'modal' }} />
