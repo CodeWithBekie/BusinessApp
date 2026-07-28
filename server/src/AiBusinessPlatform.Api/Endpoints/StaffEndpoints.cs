@@ -23,12 +23,30 @@ public static class StaffEndpoints
             try
             {
                 var result = await staffTools.InviteStaffAsync(
-                    tenantProvider.CurrentBusinessId, request.Name, request.Email, request.Password, request.Role, ct);
-                return Results.Created($"/api/staff/{result.Id}", result);
+                    tenantProvider.CurrentBusinessId, request.Name, request.Email, request.Role, ct);
+                return Results.Created($"/api/staff/{result.Staff.Id}", result);
             }
             catch (ArgumentException ex)
             {
                 return Results.BadRequest(ex.Message);
+            }
+        });
+
+        staff.MapPost("/{id:guid}/resend-invite", async (
+            Guid id, IStaffTools staffTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await staffTools.ResendStaffInviteAsync(tenantProvider.CurrentBusinessId, id, ct);
+                return Results.Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(ex.Message);
             }
         });
 

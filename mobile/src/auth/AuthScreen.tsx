@@ -41,16 +41,18 @@ export default function AuthScreen() {
 }
 
 function BusinessAuthForm({ onBack }: { onBack: () => void }) {
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [mode, setMode] = useState<'login' | 'signup' | 'accept-invite'>('login');
   const auth = useAuth();
 
   const inputStyle = useInputStyle();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [businessName, setBusinessName] = useState('');
   const [industryType, setIndustryType] = useState('retail');
   const [ownerName, setOwnerName] = useState('');
+  const [inviteToken, setInviteToken] = useState('');
 
   const [status, setStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -61,11 +63,19 @@ function BusinessAuthForm({ onBack }: { onBack: () => void }) {
     try {
       if (mode === 'login') {
         await auth.login(email.trim(), password);
-      } else {
+      } else if (mode === 'signup') {
         if (!businessName.trim() || !ownerName.trim()) {
           throw new Error('Business name and owner name are required.');
         }
         await auth.signup(businessName.trim(), industryType.trim() || 'retail', ownerName.trim(), email.trim(), password);
+      } else {
+        if (!inviteToken.trim() || !password) {
+          throw new Error('Invite code and password are required.');
+        }
+        if (password !== confirmPassword) {
+          throw new Error('Passwords do not match.');
+        }
+        await auth.acceptInvite(inviteToken.trim().toUpperCase(), password);
       }
     } catch (err) {
       setStatus('error');
@@ -75,12 +85,18 @@ function BusinessAuthForm({ onBack }: { onBack: () => void }) {
     setStatus('idle');
   };
 
+  const titles: Record<typeof mode, string> = {
+    login: 'Log in',
+    signup: 'Create your business',
+    'accept-invite': 'Accept your invite',
+  };
+
   return (
     <View style={styles.container}>
       <Pressable onPress={onBack} style={styles.back}>
         <Text style={styles.backText}>← Back</Text>
       </Pressable>
-      <Text style={styles.title}>{mode === 'login' ? 'Log in' : 'Create your business'}</Text>
+      <Text style={styles.title}>{titles[mode]}</Text>
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
 
       {mode === 'signup' && (
@@ -91,29 +107,57 @@ function BusinessAuthForm({ onBack }: { onBack: () => void }) {
         </>
       )}
 
-      <TextInput
-        style={inputStyle}
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        keyboardType="email-address"
-      />
+      {mode === 'accept-invite' && (
+        <TextInput
+          style={inputStyle}
+          placeholder="Invite code"
+          value={inviteToken}
+          onChangeText={setInviteToken}
+          autoCapitalize="characters"
+        />
+      )}
+
+      {mode !== 'accept-invite' && (
+        <TextInput
+          style={inputStyle}
+          placeholder="Email"
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          keyboardType="email-address"
+        />
+      )}
       <TextInput style={inputStyle} placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry />
+      {mode === 'accept-invite' && (
+        <TextInput
+          style={inputStyle}
+          placeholder="Confirm password"
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          secureTextEntry
+        />
+      )}
 
       <Pressable style={styles.button} disabled={status === 'submitting'} onPress={submit}>
         {status === 'submitting' ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.buttonText}>{mode === 'login' ? 'Log in' : 'Sign up'}</Text>
+          <Text style={styles.buttonText}>{mode === 'login' ? 'Log in' : mode === 'signup' ? 'Sign up' : 'Accept invite'}</Text>
         )}
       </Pressable>
 
       {error && <Text style={styles.error}>{error}</Text>}
 
-      <Pressable onPress={() => setMode(mode === 'login' ? 'signup' : 'login')} style={styles.toggle}>
+      {mode !== 'accept-invite' && (
+        <Pressable onPress={() => setMode(mode === 'login' ? 'signup' : 'login')} style={styles.toggle}>
+          <Text style={styles.toggleText}>
+            {mode === 'login' ? "Don't have a business account? Sign up" : 'Already have an account? Log in'}
+          </Text>
+        </Pressable>
+      )}
+      <Pressable onPress={() => setMode(mode === 'accept-invite' ? 'login' : 'accept-invite')} style={styles.toggle}>
         <Text style={styles.toggleText}>
-          {mode === 'login' ? "Don't have a business account? Sign up" : 'Already have an account? Log in'}
+          {mode === 'accept-invite' ? '← Back to log in' : 'Have a staff invite code? Enter it here'}
         </Text>
       </Pressable>
     </View>

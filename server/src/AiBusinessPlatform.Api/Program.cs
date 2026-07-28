@@ -6,6 +6,7 @@ using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Auth;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Domain.Entities;
+using AiBusinessPlatform.Infrastructure;
 using AiBusinessPlatform.Infrastructure.AI;
 using AiBusinessPlatform.Infrastructure.Auth;
 using AiBusinessPlatform.Infrastructure.Data;
@@ -107,6 +108,10 @@ builder.Services.AddScoped<IMessagingTools, MessagingTools>();
 builder.Services.AddScoped<IStaffTools, StaffTools>();
 builder.Services.AddScoped<IExpenseTools, ExpenseTools>();
 builder.Services.AddScoped<IAccountingTools, AccountingTools>();
+
+// StaffTools.InviteStaffAsync builds shareable invite links from this — same accepted
+// dev-placeholder limitation as PaynowOptions.PublicBaseUrl below.
+builder.Services.Configure<AppOptions>(builder.Configuration.GetSection(AppOptions.SectionName));
 
 // Section 10.2 — where the Assistant chat endpoint finds the platform's own MCP server (it
 // connects as a real MCP client, forwarding the caller's own bearer token).

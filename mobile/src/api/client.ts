@@ -166,6 +166,9 @@ export const apiClient = {
       body: JSON.stringify({ businessName, industryType, ownerName, email, password }),
     }),
 
+  acceptStaffInvite: (token: string, password: string) =>
+    request<AuthResponse>('/api/auth/accept-invite', { method: 'POST', body: JSON.stringify({ token, password }) }),
+
   getBusiness: () => request<BusinessDetails>('/api/business'),
   updateBusiness: (input: UpdateBusinessDetailsInput) =>
     request<BusinessDetails>('/api/business', { method: 'PATCH', body: JSON.stringify(input) }),
@@ -336,7 +339,9 @@ export const apiClient = {
   getMyMarketplaceOrders: () => request<MarketplaceOrderSummary[]>('/api/marketplace/my-orders'),
 
   getStaff: () => request<StaffSummary[]>('/api/staff'),
-  inviteStaff: (input: InviteStaffInput) => request<StaffSummary>('/api/staff', { method: 'POST', body: JSON.stringify(input) }),
+  inviteStaff: (input: InviteStaffInput) =>
+    request<StaffInviteResult>('/api/staff', { method: 'POST', body: JSON.stringify(input) }),
+  resendStaffInvite: (id: string) => request<StaffInviteResult>(`/api/staff/${id}/resend-invite`, { method: 'POST' }),
   updateStaff: (id: string, input: UpdateStaffInput) =>
     request<StaffSummary>(`/api/staff/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
 };
@@ -396,14 +401,23 @@ export interface StaffSummary {
   email: string;
   role: BusinessUserRole;
   isActive: boolean;
+  status: 'Active' | 'Deactivated' | 'Pending' | 'Expired';
   createdAt: string;
 }
 
 export interface InviteStaffInput {
   name: string;
   email: string;
-  password: string;
   role: BusinessUserRole;
+}
+
+// No password here — the invitee sets their own via apiClient.acceptStaffInvite. inviteToken/
+// inviteLink are only ever returned from invite/resend-invite, never from getStaff.
+export interface StaffInviteResult {
+  staff: StaffSummary;
+  inviteToken: string;
+  inviteLink: string;
+  expiresAt: string;
 }
 
 export interface UpdateStaffInput {

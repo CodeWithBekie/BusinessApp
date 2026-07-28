@@ -10,6 +10,7 @@ interface AuthContextValue {
   session: Session | null;
   login: (email: string, password: string) => Promise<void>;
   signup: (businessName: string, industryType: string, ownerName: string, email: string, password: string) => Promise<void>;
+  acceptInvite: (token: string, password: string) => Promise<void>;
   customerLogin: (email: string, password: string) => Promise<void>;
   customerSignup: (email: string, password: string, name?: string, phoneNumber?: string) => Promise<void>;
   logout: () => void;
@@ -45,6 +46,14 @@ export function AuthProvider({ children, initialSession = null }: { children: Re
     [applySession]
   );
 
+  const acceptInvite = useCallback(
+    async (token: string, password: string) => {
+      const auth = await apiClient.acceptStaffInvite(token, password);
+      applySession({ kind: 'business', token: auth.token, businessId: auth.businessId, businessUserId: auth.businessUserId, role: auth.role });
+    },
+    [applySession]
+  );
+
   const customerLogin = useCallback(
     async (email: string, password: string) => {
       const auth = await apiClient.customerLogin(email, password);
@@ -73,8 +82,8 @@ export function AuthProvider({ children, initialSession = null }: { children: Re
   useMemo(() => setUnauthorizedHandler(() => logout()), [logout]);
 
   const value = useMemo(
-    () => ({ session, login, signup, customerLogin, customerSignup, logout }),
-    [session, login, signup, customerLogin, customerSignup, logout]
+    () => ({ session, login, signup, acceptInvite, customerLogin, customerSignup, logout }),
+    [session, login, signup, acceptInvite, customerLogin, customerSignup, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

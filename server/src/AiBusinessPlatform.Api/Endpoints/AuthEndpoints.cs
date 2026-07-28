@@ -84,6 +84,37 @@ public static class AuthEndpoints
 
             return Results.Ok(IssueToken(user, jwtOptions.Value));
         });
+
+        // Completes StaffTools.InviteStaffAsync's pending invite — no session required, same as
+        // signup/login, since the invitee has no account yet to authenticate with.
+        auth.MapPost("/accept-invite", async (
+            AcceptInviteRequest request, AiBusinessPlatformDbContext db, IPasswordHasher<BusinessUser> passwordHasher,
+            IOptions<JwtOptions> jwtOptions, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.Password))
+            {
+                return Results.BadRequest("token and password are required.");
+            }
+
+            var user = await db.BusinessUsers.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(u => u.InvitationToken == request.Token, ct);
+            if (user is null || user.IsActive)
+            {
+                return Results.BadRequest("This invite code is invalid.");
+            }
+            if (user.InvitationExpiresAt is null || user.InvitationExpiresAt < DateTimeOffset.UtcNow)
+            {
+                return Results.BadRequest("This invite code has expired. Ask the business owner to resend it.");
+            }
+
+            user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
+            user.IsActive = true;
+            user.InvitationToken = null;
+            user.InvitationExpiresAt = null;
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(IssueToken(user, jwtOptions.Value));
+        });
     }
 
     private static AuthResponse IssueToken(BusinessUser user, JwtOptions options)

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, TextInput } from 'react-native';
 
-import { apiClient, BusinessUserRole, StaffSummary } from '@/src/api/client';
+import { apiClient, BusinessUserRole, StaffInviteResult, StaffSummary } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAuth } from '@/src/auth/AuthContext';
@@ -352,10 +352,10 @@ function StaffManagementForm() {
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [role, setRole] = useState<BusinessUserRole>('Cashier');
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteResult, setInviteResult] = useState<StaffInviteResult | null>(null);
 
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
@@ -370,22 +370,35 @@ function StaffManagementForm() {
 
   const invite = async () => {
     setInviteError(null);
-    if (!name.trim() || !email.trim() || !password.trim()) {
-      setInviteError('Name, email, and password are all required.');
+    if (!name.trim() || !email.trim()) {
+      setInviteError('Name and email are required.');
       return;
     }
     setInviting(true);
     try {
-      await apiClient.inviteStaff({ name: name.trim(), email: email.trim(), password, role });
+      const result = await apiClient.inviteStaff({ name: name.trim(), email: email.trim(), role });
       setName('');
       setEmail('');
-      setPassword('');
       setRole('Cashier');
+      setInviteResult(result);
       loadStaff();
     } catch (err) {
       setInviteError((err as Error).message);
     } finally {
       setInviting(false);
+    }
+  };
+
+  const resendInvite = async (member: StaffSummary) => {
+    setUpdatingId(member.id);
+    try {
+      const result = await apiClient.resendStaffInvite(member.id);
+      setInviteResult(result);
+      loadStaff();
+    } catch (err) {
+      setListError((err as Error).message);
+    } finally {
+      setUpdatingId(null);
     }
   };
 
@@ -404,7 +417,24 @@ function StaffManagementForm() {
   return (
     <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
       <Text style={styles.cardTitle}>Staff</Text>
-      <Text style={styles.cardSubtitle}>Invite employees and manage their role. Deactivating blocks their next login.</Text>
+      <Text style={styles.cardSubtitle}>
+        Invite employees and manage their role. There's no email sending yet — share the invite code shown after inviting.
+      </Text>
+
+      {inviteResult && (
+        <View style={styles.inviteResultCard} lightColor="#eef6ff" darkColor="rgba(0,122,255,0.12)">
+          <Text style={styles.inviteResultTitle}>Share this with {inviteResult.staff.name}</Text>
+          <Text style={styles.inviteResultCode} selectable>
+            {inviteResult.inviteToken}
+          </Text>
+          <Text style={styles.inviteResultLink} selectable>
+            {inviteResult.inviteLink}
+          </Text>
+          <Pressable onPress={() => setInviteResult(null)} style={styles.inviteResultDismiss}>
+            <Text style={styles.inviteResultDismissText}>Dismiss</Text>
+          </Pressable>
+        </View>
+      )}
 
       {listError && <Text style={styles.error}>{listError}</Text>}
       {staff?.map((member) => (
@@ -416,17 +446,30 @@ function StaffManagementForm() {
             </Text>
             <Text style={styles.staffMeta}>
               {member.email} · {ROLE_LABELS[member.role]}
-              {!member.isActive ? ' · Deactivated' : ''}
+              {member.status !== 'Active' ? ` · ${member.status}` : ''}
             </Text>
           </View>
           {member.id !== currentUserId && (
-            <Pressable
-              style={[styles.staffToggleButton, (updatingId === member.id || !isOnline) && styles.buttonDisabled]}
-              disabled={updatingId === member.id || !isOnline}
-              onPress={() => toggleActive(member)}
-            >
-              <Text style={styles.staffToggleButtonText}>{member.isActive ? 'Deactivate' : 'Reactivate'}</Text>
-            </Pressable>
+            <View style={styles.staffActions} lightColor="transparent" darkColor="transparent">
+              {(member.status === 'Pending' || member.status === 'Expired') && (
+                <Pressable
+                  style={[styles.staffToggleButton, (updatingId === member.id || !isOnline) && styles.buttonDisabled]}
+                  disabled={updatingId === member.id || !isOnline}
+                  onPress={() => resendInvite(member)}
+                >
+                  <Text style={styles.staffToggleButtonText}>Resend invite</Text>
+                </Pressable>
+              )}
+              {(member.status === 'Active' || member.status === 'Deactivated') && (
+                <Pressable
+                  style={[styles.staffToggleButton, (updatingId === member.id || !isOnline) && styles.buttonDisabled]}
+                  disabled={updatingId === member.id || !isOnline}
+                  onPress={() => toggleActive(member)}
+                >
+                  <Text style={styles.staffToggleButtonText}>{member.isActive ? 'Deactivate' : 'Reactivate'}</Text>
+                </Pressable>
+              )}
+            </View>
           )}
         </View>
       ))}
@@ -434,7 +477,6 @@ function StaffManagementForm() {
       <Text style={[styles.cardSubtitle, styles.staffInviteHeading]}>Invite staff</Text>
       <TextInput style={inputStyle} placeholder="Name" value={name} onChangeText={setName} />
       <TextInput style={inputStyle} placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-      <TextInput style={inputStyle} placeholder="Temporary password" value={password} onChangeText={setPassword} secureTextEntry />
       <View style={styles.roleRow} lightColor="transparent" darkColor="transparent">
         {INVITABLE_ROLES.map((option) => {
           const active = option.value === role;
@@ -525,9 +567,16 @@ const styles = StyleSheet.create({
   staffInfo: { flexShrink: 1 },
   staffName: { fontSize: 14, fontWeight: '600' },
   staffMeta: { fontSize: 12, opacity: 0.6, marginTop: 2 },
+  staffActions: { flexDirection: 'row', gap: 8 },
   staffToggleButton: { borderWidth: 1, borderColor: '#c0392b', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
   staffToggleButtonText: { color: '#c0392b', fontSize: 12, fontWeight: '600' },
   staffInviteHeading: { marginTop: 12, marginBottom: 8 },
+  inviteResultCard: { borderRadius: 8, padding: 12, marginBottom: 12 },
+  inviteResultTitle: { fontSize: 13, fontWeight: '600', marginBottom: 6 },
+  inviteResultCode: { fontSize: 20, fontWeight: '700', letterSpacing: 2, marginBottom: 4 },
+  inviteResultLink: { fontSize: 12, opacity: 0.7 },
+  inviteResultDismiss: { marginTop: 8, alignSelf: 'flex-start' },
+  inviteResultDismissText: { color: '#007aff', fontSize: 12, fontWeight: '600' },
   roleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
   roleChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#ccc' },
   roleChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
