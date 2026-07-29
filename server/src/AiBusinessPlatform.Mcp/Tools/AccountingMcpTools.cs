@@ -26,4 +26,25 @@ public class AccountingMcpTools(IAccountingTools accountingTools, ICurrentTenant
         permissionChecker.EnsurePermission(Permission.ViewAccounting);
         return accountingTools.GetProfitAndLossAsync(tenantProvider.CurrentBusinessId, range, from, to, cancellationToken);
     }
+
+    [McpServerTool(Name = "get_general_ledger"), Description("Gets the general ledger — raw journal entry lines posted by automated bookkeeping (sales, expenses, purchase receipts, supplier payments), most recent first. Optionally filter to one account by its code (e.g. \"cash\", \"sales_revenue\", \"accounts_payable\", \"inventory\") and/or a date range (from/to, ISO 8601).")]
+    public Task<GeneralLedgerResult> GetGeneralLedger(string? accountCode = null, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken cancellationToken = default)
+    {
+        permissionChecker.EnsurePermission(Permission.ViewAccounting);
+        return accountingTools.GetGeneralLedgerAsync(tenantProvider.CurrentBusinessId, accountCode, from, to, cancellationToken);
+    }
+
+    [McpServerTool(Name = "get_trial_balance"), Description("Gets a trial balance — every account's total debits, total credits, and net balance as of a point in time (defaults to now). Total debits should always equal total credits.")]
+    public Task<TrialBalanceResult> GetTrialBalance(DateTimeOffset? asOf = null, CancellationToken cancellationToken = default)
+    {
+        permissionChecker.EnsurePermission(Permission.ViewAccounting);
+        return accountingTools.GetTrialBalanceAsync(tenantProvider.CurrentBusinessId, asOf, cancellationToken);
+    }
+
+    [McpServerTool(Name = "get_cash_flow"), Description("Gets a multi-period cash flow view: cash in vs cash out per period, broken down by source (sales, expenses, supplier payments), for a range \"today\"/\"7d\"/\"30d\"/\"all\" or an explicit from/to. The multi-period counterpart to get_cash_up (single day only).")]
+    public Task<CashFlowResult> GetCashFlow(string? range = null, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken cancellationToken = default)
+    {
+        permissionChecker.EnsurePermission(Permission.ViewAccounting);
+        return accountingTools.GetCashFlowAsync(tenantProvider.CurrentBusinessId, range, from, to, cancellationToken);
+    }
 }

@@ -298,6 +298,26 @@ export const apiClient = {
     const qs = params.toString();
     return request<ProfitAndLossResult>(`/api/accounting/profit-and-loss${qs ? `?${qs}` : ''}`);
   },
+  getCashFlow: (range?: SalesRange, from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (from && to) {
+      params.set('from', from);
+      params.set('to', to);
+    } else if (range) {
+      params.set('range', range);
+    }
+    const qs = params.toString();
+    return request<CashFlowResult>(`/api/accounting/cash-flow${qs ? `?${qs}` : ''}`);
+  },
+  getTrialBalance: (asOf?: string) => request<TrialBalanceResult>(`/api/accounting/trial-balance${asOf ? `?asOf=${asOf}` : ''}`),
+  getGeneralLedger: (accountCode?: string, from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (accountCode) params.set('accountCode', accountCode);
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const qs = params.toString();
+    return request<GeneralLedgerResult>(`/api/accounting/general-ledger${qs ? `?${qs}` : ''}`);
+  },
 
   ingestDocument: (title: string, content: string, sourceType?: string) =>
     request<IngestDocumentResult>('/api/documents', {
@@ -806,4 +826,68 @@ export interface ProfitAndLossResult {
   rangeStart: string | null;
   rangeEnd: string | null;
   currencies: ProfitAndLossCurrencyBreakdown[];
+}
+
+export interface CashFlowBucket {
+  periodStart: string;
+  cashIn: number;
+  cashOut: number;
+  netChange: number;
+}
+
+export interface CashFlowBreakdownItem {
+  sourceType: string;
+  amount: number;
+}
+
+export interface CashFlowCurrencyGroup {
+  currency: string;
+  buckets: CashFlowBucket[];
+  inflowBreakdown: CashFlowBreakdownItem[];
+  outflowBreakdown: CashFlowBreakdownItem[];
+  netCashFlow: number;
+}
+
+export interface CashFlowResult {
+  range: string;
+  rangeStart: string | null;
+  rangeEnd: string | null;
+  currencies: CashFlowCurrencyGroup[];
+}
+
+export type AccountType = 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
+
+export interface TrialBalanceRow {
+  accountCode: string;
+  accountName: string;
+  accountType: AccountType;
+  totalDebit: number;
+  totalCredit: number;
+  balance: number;
+}
+
+export interface TrialBalanceResult {
+  asOf: string;
+  rows: TrialBalanceRow[];
+  totalDebits: number;
+  totalCredits: number;
+}
+
+export interface GeneralLedgerLine {
+  journalEntryId: string;
+  postedAt: string;
+  description: string;
+  sourceType: string;
+  sourceId: string;
+  accountCode: string;
+  accountName: string;
+  debit: number;
+  credit: number;
+}
+
+export interface GeneralLedgerResult {
+  accountCode: string | null;
+  from: string | null;
+  to: string | null;
+  lines: GeneralLedgerLine[];
 }

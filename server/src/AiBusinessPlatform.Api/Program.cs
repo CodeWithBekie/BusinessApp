@@ -10,6 +10,7 @@ using AiBusinessPlatform.Infrastructure;
 using AiBusinessPlatform.Infrastructure.AI;
 using AiBusinessPlatform.Infrastructure.Auth;
 using AiBusinessPlatform.Infrastructure.Data;
+using AiBusinessPlatform.Infrastructure.Ledger;
 using AiBusinessPlatform.Infrastructure.Messaging;
 using AiBusinessPlatform.Infrastructure.Payments;
 using AiBusinessPlatform.Infrastructure.Tools;
@@ -108,6 +109,7 @@ builder.Services.AddScoped<IMessagingTools, MessagingTools>();
 builder.Services.AddScoped<IStaffTools, StaffTools>();
 builder.Services.AddScoped<IExpenseTools, ExpenseTools>();
 builder.Services.AddScoped<IAccountingTools, AccountingTools>();
+builder.Services.AddScoped<ILedgerPostingService, LedgerPostingService>();
 
 // StaffTools.InviteStaffAsync builds shareable invite links from this — same accepted
 // dev-placeholder limitation as PaynowOptions.PublicBaseUrl below.

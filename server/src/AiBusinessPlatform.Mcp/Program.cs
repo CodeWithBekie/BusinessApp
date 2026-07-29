@@ -4,6 +4,7 @@ using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Infrastructure.AI;
 using AiBusinessPlatform.Infrastructure.Auth;
 using AiBusinessPlatform.Infrastructure.Data;
+using AiBusinessPlatform.Infrastructure.Ledger;
 using AiBusinessPlatform.Infrastructure.Payments;
 using AiBusinessPlatform.Infrastructure.Tools;
 using AiBusinessPlatform.Infrastructure.WhatsApp;
@@ -64,6 +65,7 @@ builder.Services.AddScoped<IWhatsAppMessageService, WhatsAppMessageService>();
 builder.Services.AddScoped<IMessagingTools, MessagingTools>();
 builder.Services.AddScoped<IExpenseTools, ExpenseTools>();
 builder.Services.AddScoped<IAccountingTools, AccountingTools>();
+builder.Services.AddScoped<ILedgerPostingService, LedgerPostingService>();
 
 // Section 10.7 — the same C# functions the in-app orchestrator/dashboard/Assistant call, exposed
 // as MCP tools. The Assistant chat endpoint (Api project) is itself an MCP client of this server —
@@ -81,6 +83,8 @@ builder.Services
     .WithTools<SupplierMcpTools>()
     .WithTools<PurchaseOrderMcpTools>()
     .WithTools<CustomerMessagingMcpTools>()
+    .WithTools<AccountingMcpTools>()
+    .WithTools<ExpenseMcpTools>()
     .WithResources<BusinessResources>();
 
 var app = builder.Build();

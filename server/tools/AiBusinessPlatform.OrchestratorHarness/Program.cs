@@ -3,6 +3,7 @@ using System.Text.Json;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Infrastructure.Data;
+using AiBusinessPlatform.Infrastructure.Ledger;
 using AiBusinessPlatform.Infrastructure.Payments;
 using AiBusinessPlatform.Infrastructure.Tools;
 using AiBusinessPlatform.Infrastructure.WhatsApp;
@@ -52,6 +53,11 @@ builder.Services.AddHttpClient<IWhatsAppSender, WhatsAppGraphClient>(client =>
     client.BaseAddress = new Uri("https://graph.facebook.com/");
 });
 builder.Services.AddScoped<IWhatsAppMessageService, WhatsAppMessageService>();
+
+// Only registered here to satisfy OrderTools' constructor dependency, same accepted shape as the
+// IPaynowClient/IWhatsAppSender registrations above — this harness's scenarios don't exercise
+// ledger reporting, just enough posting to not crash on a real sale/payment.
+builder.Services.AddScoped<ILedgerPostingService, LedgerPostingService>();
 builder.Services.AddScoped<IOrderTools, OrderTools>();
 
 using var host = builder.Build();

@@ -5,14 +5,17 @@ import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, Sty
 
 import {
   apiClient,
+  CashFlowResult,
   CashUpResult,
   CreateExpenseInput,
   ExpenseCategory,
   ExpenseSummary,
+  GeneralLedgerResult,
   PosPaymentMethod,
   ProfitAndLossResult,
   SalesRange,
   SalesSummary,
+  TrialBalanceResult,
 } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -21,13 +24,15 @@ import { useCachedFetch } from '@/src/offline/useCachedFetch';
 import { useIsOnline } from '@/src/offline/networkStatus';
 import { useHasPermission } from '@/src/auth/permissions';
 
-type Section = 'sales' | 'pnl' | 'cashup' | 'expenses';
+type Section = 'sales' | 'pnl' | 'cashup' | 'cashflow' | 'ledger' | 'expenses';
 
 function SectionTabs({ value, onChange }: { value: Section; onChange: (value: Section) => void }) {
   const options: readonly { value: Section; label: string }[] = [
     { value: 'sales', label: 'Sales' },
     { value: 'pnl', label: 'P&L' },
     { value: 'cashup', label: 'Cash Up' },
+    { value: 'cashflow', label: 'Cash Flow' },
+    { value: 'ledger', label: 'Ledger' },
     { value: 'expenses', label: 'Expenses' },
   ];
   return (
@@ -346,6 +351,321 @@ function CashUpSection() {
   );
 }
 
+function friendlySourceType(sourceType: string): string {
+  switch (sourceType) {
+    case 'Sale':
+      return 'Sales';
+    case 'Expense':
+      return 'Expenses';
+    case 'SupplierPayment':
+      return 'Supplier payments';
+    default:
+      return sourceType;
+  }
+}
+
+// The multi-period counterpart to CashUpSection above (single day only) — reuses the same
+// RangeTabs/custom-range pattern as PnlSection. Bars are two-tone since net cash change can go
+// negative, unlike TrendChart's always-positive revenue bars.
+function CashFlowChart({ buckets }: { buckets: CashFlowResult['currencies'][number]['buckets'] }) {
+  const colorScheme = useColorScheme();
+  const maxAbs = Math.max(...buckets.map((b) => Math.abs(b.netChange)), 1);
+
+  return (
+    <View style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+      <Text style={styles.sectionTitle}>Net cash change</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={styles.chartRow} lightColor="transparent" darkColor="transparent">
+          {buckets.map((bucket) => {
+            const height = Math.max((Math.abs(bucket.netChange) / maxAbs) * CHART_HEIGHT, 3);
+            return (
+              <View key={bucket.periodStart} style={styles.chartBarCol} lightColor="transparent" darkColor="transparent">
+                <View style={styles.chartBarTrack}>
+                  <View style={[styles.chartBar, bucket.netChange < 0 ? styles.chartBarNegative : styles.chartBarPositive, { height }]} />
+                </View>
+                <Text style={[styles.chartLabel, colorScheme === 'dark' ? styles.metaDark : styles.metaLight]}>
+                  {formatShortDate(bucket.periodStart)}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+function CashFlowSection() {
+  const [filter, setFilter] = useState<FilterValue>('30d');
+  const [fromDate, setFromDate] = useState<Date | null>(null);
+  const [toDate, setToDate] = useState<Date | null>(null);
+  const [dateError, setDateError] = useState<string | null>(null);
+
+  const fetchCashFlow = useCallback(() => {
+    if (filter === 'custom' && fromDate && toDate) {
+      return apiClient.getCashFlow(undefined, `${toDateKey(fromDate)}T00:00:00Z`, `${toDateKey(toDate)}T23:59:59Z`);
+    }
+    return apiClient.getCashFlow(filter === 'custom' ? undefined : filter);
+  }, [filter, fromDate, toDate]);
+
+  const cacheKey = filter === 'custom' && fromDate && toDate ? `cashflow:custom:${toDateKey(fromDate)}:${toDateKey(toDate)}` : `cashflow:${filter}`;
+  const { data: cashFlow, error, refreshing, isFromCache, reload: load } = useCachedFetch<CashFlowResult>(cacheKey, fetchCashFlow);
+
+  const applyCustomRange = useCallback(
+    (isRefresh = false) => {
+      if (!fromDate || !toDate) {
+        setDateError('Pick both a from and to date.');
+        return;
+      }
+      if (fromDate > toDate) {
+        setDateError('The from date must be before the to date.');
+        return;
+      }
+      setDateError(null);
+      load(isRefresh);
+    },
+    [fromDate, toDate, load]
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (filter === 'custom') return;
+      load();
+    }, [filter, load])
+  );
+
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => (filter === 'custom' ? applyCustomRange(true) : load(true))} />}
+    >
+      <RangeTabs value={filter} onChange={setFilter} />
+      {filter === 'custom' && (
+        <View style={styles.customRangeRow} lightColor="transparent" darkColor="transparent">
+          <DateField label="From" value={fromDate} onChange={setFromDate} />
+          <DateField label="To" value={toDate} onChange={setToDate} />
+          <Pressable style={styles.applyButton} onPress={() => applyCustomRange(false)}>
+            <Text style={styles.applyButtonText}>Apply</Text>
+          </Pressable>
+        </View>
+      )}
+      {dateError && <Text style={styles.error}>{dateError}</Text>}
+
+      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
+
+      {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
+      {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
+      {!error && cashFlow === null && <ActivityIndicator style={styles.loading} />}
+
+      {!error && cashFlow !== null && (
+        <>
+          {cashFlow.currencies.length === 0 && <Text style={styles.empty}>No cash movement in this range yet.</Text>}
+          {cashFlow.currencies.map((c) => (
+            <View key={c.currency}>
+              {c.buckets.length > 1 && <CashFlowChart buckets={c.buckets} />}
+              <View style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+                <Text style={styles.sectionTitle}>{c.currency}</Text>
+                <Text style={styles.cashUpSubheading}>Cash in</Text>
+                {c.inflowBreakdown.map((item) => (
+                  <View key={`in-${item.sourceType}`} style={styles.pnlRow} lightColor="transparent" darkColor="transparent">
+                    <Text style={styles.pnlLabel}>{friendlySourceType(item.sourceType)}</Text>
+                    <Text style={styles.pnlValue}>{formatMoney(item.amount, c.currency)}</Text>
+                  </View>
+                ))}
+                {c.inflowBreakdown.length === 0 && <Text style={styles.empty}>No cash in.</Text>}
+
+                <Text style={[styles.cashUpSubheading, styles.cashUpSubheadingSpaced]}>Cash out</Text>
+                {c.outflowBreakdown.map((item) => (
+                  <View key={`out-${item.sourceType}`} style={styles.pnlRow} lightColor="transparent" darkColor="transparent">
+                    <Text style={styles.pnlLabel}>{friendlySourceType(item.sourceType)}</Text>
+                    <Text style={styles.pnlValue}>({formatMoney(item.amount, c.currency)})</Text>
+                  </View>
+                ))}
+                {c.outflowBreakdown.length === 0 && <Text style={styles.empty}>No cash out.</Text>}
+
+                <View style={[styles.pnlRow, styles.pnlTotalRow]} lightColor="transparent" darkColor="transparent">
+                  <Text style={styles.pnlTotalLabel}>Net cash flow</Text>
+                  <Text style={styles.pnlTotalValue}>{formatMoney(c.netCashFlow, c.currency)}</Text>
+                </View>
+              </View>
+            </View>
+          ))}
+        </>
+      )}
+    </ScrollView>
+  );
+}
+
+// Mirrors LedgerAccountCodes.StandardAccounts (server/src/AiBusinessPlatform.Application/Tools) —
+// a fixed, code-referenced chart of accounts, not something the app lets you create/edit.
+const ACCOUNT_FILTERS: readonly { code: string; label: string }[] = [
+  { code: 'cash', label: 'Cash' },
+  { code: 'bank', label: 'Bank' },
+  { code: 'mobile_money', label: 'Mobile Money' },
+  { code: 'other_receipts', label: 'Other Receipts' },
+  { code: 'inventory', label: 'Inventory' },
+  { code: 'accounts_payable', label: 'Accounts Payable' },
+  { code: 'vat_payable', label: 'VAT Payable' },
+  { code: 'sales_revenue', label: 'Sales Revenue' },
+  { code: 'cost_of_goods_sold', label: 'Cost of Goods Sold' },
+  { code: 'expense_rent', label: 'Rent Expense' },
+  { code: 'expense_utilities', label: 'Utilities Expense' },
+  { code: 'expense_wages', label: 'Wages Expense' },
+  { code: 'expense_supplies', label: 'Supplies Expense' },
+  { code: 'expense_transport', label: 'Transport Expense' },
+  { code: 'expense_marketing', label: 'Marketing Expense' },
+  { code: 'expense_other', label: 'Other Expense' },
+];
+
+function accountLabel(code: string): string {
+  return ACCOUNT_FILTERS.find((a) => a.code === code)?.label ?? code;
+}
+
+// Audit-level views (trial balance / general ledger) — power-user tools better suited to the
+// Assistant ("what's my trial balance?") than a full-blown UI, so this stays a single "Ledger"
+// section with a lightweight internal toggle rather than two more top-level Sales tabs.
+function TrialBalanceView() {
+  const fetchTrialBalance = useCallback(() => apiClient.getTrialBalance(), []);
+  const { data: trialBalance, error, refreshing, isFromCache, reload: load } = useCachedFetch<TrialBalanceResult>('trial-balance', fetchTrialBalance);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
+
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+    >
+      {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
+      {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
+      {!error && trialBalance === null && <ActivityIndicator style={styles.loading} />}
+
+      {!error && trialBalance !== null && (
+        <View style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+          {trialBalance.rows.length === 0 && <Text style={styles.empty}>No ledger activity yet.</Text>}
+          {trialBalance.rows.map((row) => (
+            <View key={row.accountCode} style={styles.ledgerRow} lightColor="transparent" darkColor="transparent">
+              <View style={styles.ledgerInfo} lightColor="transparent" darkColor="transparent">
+                <Text style={styles.rowPrimary} numberOfLines={1}>
+                  {row.accountName}
+                </Text>
+                <Text style={styles.rowSecondary}>
+                  {row.accountType} · Dr {row.totalDebit.toFixed(2)} / Cr {row.totalCredit.toFixed(2)}
+                </Text>
+              </View>
+              <Text style={styles.rowPrimary}>{row.balance.toFixed(2)}</Text>
+            </View>
+          ))}
+          {trialBalance.rows.length > 0 && (
+            <View style={[styles.pnlRow, styles.pnlTotalRow]} lightColor="transparent" darkColor="transparent">
+              <Text style={styles.pnlTotalLabel}>Total debits / credits</Text>
+              <Text style={styles.pnlTotalValue}>
+                {trialBalance.totalDebits.toFixed(2)} / {trialBalance.totalCredits.toFixed(2)}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+function GeneralLedgerView() {
+  const [accountCode, setAccountCode] = useState<string | null>(null);
+
+  const fetchGeneralLedger = useCallback(() => apiClient.getGeneralLedger(accountCode ?? undefined), [accountCode]);
+  const cacheKey = accountCode ? `general-ledger:${accountCode}` : 'general-ledger:all';
+  const { data: ledger, error, refreshing, isFromCache, reload: load } = useCachedFetch<GeneralLedgerResult>(cacheKey, fetchGeneralLedger);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
+
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+    >
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={styles.filterRow} lightColor="transparent" darkColor="transparent">
+          <Pressable onPress={() => setAccountCode(null)} style={[styles.filterChip, accountCode === null && styles.filterChipActive]}>
+            <Text style={[styles.filterChipText, accountCode === null && styles.filterChipTextActive]}>All accounts</Text>
+          </Pressable>
+          {ACCOUNT_FILTERS.map((a) => {
+            const active = a.code === accountCode;
+            return (
+              <Pressable key={a.code} onPress={() => setAccountCode(a.code)} style={[styles.filterChip, active && styles.filterChipActive]}>
+                <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{a.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </ScrollView>
+
+      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
+
+      {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
+      {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
+      {!error && ledger === null && <ActivityIndicator style={styles.loading} />}
+
+      {!error && ledger !== null && (
+        <>
+          {ledger.lines.length === 0 && <Text style={styles.empty}>No journal entries yet.</Text>}
+          {ledger.lines.map((line, index) => (
+            <View key={`${line.journalEntryId}-${index}`} style={styles.ledgerRow} lightColor="transparent" darkColor="transparent">
+              <View style={styles.ledgerInfo} lightColor="transparent" darkColor="transparent">
+                <Text style={styles.rowPrimary} numberOfLines={1}>
+                  {line.description}
+                </Text>
+                <Text style={styles.rowSecondary}>
+                  {accountLabel(line.accountCode)} · {new Date(line.postedAt).toLocaleDateString()}
+                </Text>
+              </View>
+              <Text style={line.debit > 0 ? styles.ledgerDebit : styles.ledgerCredit}>
+                {line.debit > 0 ? line.debit.toFixed(2) : `(${line.credit.toFixed(2)})`}
+              </Text>
+            </View>
+          ))}
+        </>
+      )}
+    </ScrollView>
+  );
+}
+
+function LedgerSection() {
+  const [subview, setSubview] = useState<'trial-balance' | 'general-ledger'>('trial-balance');
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.screenHeaderPadding} lightColor="transparent" darkColor="transparent">
+        <View style={styles.filterRow} lightColor="transparent" darkColor="transparent">
+          <Pressable
+            onPress={() => setSubview('trial-balance')}
+            style={[styles.filterChip, subview === 'trial-balance' && styles.filterChipActive]}
+          >
+            <Text style={[styles.filterChipText, subview === 'trial-balance' && styles.filterChipTextActive]}>Trial Balance</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setSubview('general-ledger')}
+            style={[styles.filterChip, subview === 'general-ledger' && styles.filterChipActive]}
+          >
+            <Text style={[styles.filterChipText, subview === 'general-ledger' && styles.filterChipTextActive]}>General Ledger</Text>
+          </Pressable>
+        </View>
+      </View>
+      {subview === 'trial-balance' ? <TrialBalanceView /> : <GeneralLedgerView />}
+    </View>
+  );
+}
+
 const EXPENSE_CATEGORIES: readonly ExpenseCategory[] = ['Rent', 'Utilities', 'Wages', 'Supplies', 'Transport', 'Marketing', 'Other'];
 const EXPENSE_PAYMENT_METHODS: readonly PosPaymentMethod[] = ['Cash', 'EcoCash', 'Bank', 'Other'];
 
@@ -617,6 +937,8 @@ export default function SalesScreen() {
       {section === 'sales' && <SalesSection />}
       {section === 'pnl' && <PnlSection />}
       {section === 'cashup' && <CashUpSection />}
+      {section === 'cashflow' && <CashFlowSection />}
+      {section === 'ledger' && <LedgerSection />}
       {section === 'expenses' && <ExpensesSection />}
     </View>
   );
@@ -657,6 +979,8 @@ const styles = StyleSheet.create({
   chartBarCol: { alignItems: 'center', width: 32 },
   chartBarTrack: { height: CHART_HEIGHT, justifyContent: 'flex-end' },
   chartBar: { width: 16, backgroundColor: '#007aff', borderRadius: 4 },
+  chartBarPositive: { backgroundColor: '#2e7d32' },
+  chartBarNegative: { backgroundColor: '#c0392b' },
   chartLabel: { fontSize: 10, marginTop: 6 },
   topItemRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   topItemNameCol: { flexShrink: 1, paddingRight: 12 },
@@ -693,6 +1017,18 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
   },
   expenseInfo: { flexShrink: 1 },
+  ledgerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  ledgerInfo: { flexShrink: 1 },
+  ledgerDebit: { fontSize: 14, fontWeight: '600', color: '#2e7d32' },
+  ledgerCredit: { fontSize: 14, fontWeight: '600', color: '#c0392b' },
   expenseDeleteButton: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#c0392b' },
   expenseDeleteText: { color: '#c0392b', fontSize: 12, fontWeight: '600' },
   expenseInput: { marginTop: 10 },

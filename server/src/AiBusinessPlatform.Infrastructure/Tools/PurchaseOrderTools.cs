@@ -8,7 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AiBusinessPlatform.Infrastructure.Tools;
 
-public class PurchaseOrderTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantProvider tenantProvider, ICatalogTools catalogTools) : IPurchaseOrderTools
+public class PurchaseOrderTools(
+    AiBusinessPlatformDbContext dbContext, ICurrentTenantProvider tenantProvider, ICatalogTools catalogTools,
+    ILedgerPostingService ledgerPostingService) : IPurchaseOrderTools
 {
     public async Task<IReadOnlyList<PurchaseOrderSummary>> ListPurchaseOrdersAsync(Guid businessId, PurchaseOrderStatus? status, CancellationToken cancellationToken = default)
     {
@@ -294,6 +296,10 @@ public class PurchaseOrderTools(AiBusinessPlatformDbContext dbContext, ICurrentT
             CreatedAt = DateTimeOffset.UtcNow
         });
 
+        var totalReceivedCost = items.Sum(line => line.Quantity * line.UnitCost);
+        await ledgerPostingService.PostPurchaseReceiptAsync(
+            businessId, purchaseOrder.Id, totalReceivedCost, purchaseOrder.Currency, purchaseOrder.ReceivedAt!.Value, cancellationToken);
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return await GetPurchaseOrderAsync(businessId, purchaseOrder.Id, cancellationToken);
@@ -337,6 +343,9 @@ public class PurchaseOrderTools(AiBusinessPlatformDbContext dbContext, ICurrentT
             AfterStateJson = JsonSerializer.Serialize(new { purchaseOrder.AmountPaid, Provider = provider.ToString(), Amount = amount }),
             CreatedAt = DateTimeOffset.UtcNow
         });
+
+        await ledgerPostingService.PostSupplierPaymentAsync(
+            businessId, purchaseOrder.Id, amount, provider, purchaseOrder.Currency, DateTimeOffset.UtcNow, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 

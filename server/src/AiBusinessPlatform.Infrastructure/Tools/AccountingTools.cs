@@ -135,4 +135,130 @@ public class AccountingTools(AiBusinessPlatformDbContext dbContext, ICurrentTena
 
         return new ProfitAndLossResult(rangeKey, rangeStart, rangeEnd, breakdowns);
     }
+
+    public async Task<GeneralLedgerResult> GetGeneralLedgerAsync(
+        Guid businessId, string? accountCode = null, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+
+        var query =
+            from jl in dbContext.JournalLines.AsNoTracking()
+            join je in dbContext.JournalEntries.AsNoTracking() on jl.JournalEntryId equals je.Id
+            join a in dbContext.Accounts.AsNoTracking() on jl.AccountId equals a.Id
+            select new { jl, je, a };
+
+        if (!string.IsNullOrWhiteSpace(accountCode))
+        {
+            query = query.Where(x => x.a.Code == accountCode);
+        }
+        if (from is not null)
+        {
+            query = query.Where(x => x.je.PostedAt >= from);
+        }
+        if (to is not null)
+        {
+            query = query.Where(x => x.je.PostedAt <= to);
+        }
+
+        var lines = await query
+            .OrderByDescending(x => x.je.PostedAt)
+            .Select(x => new GeneralLedgerLine(x.je.Id, x.je.PostedAt, x.je.Description, x.je.SourceType, x.je.SourceId, x.a.Code, x.a.Name, x.jl.Debit, x.jl.Credit))
+            .ToListAsync(cancellationToken);
+
+        return new GeneralLedgerResult(accountCode, from, to, lines);
+    }
+
+    public async Task<TrialBalanceResult> GetTrialBalanceAsync(Guid businessId, DateTimeOffset? asOf = null, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+
+        var cutoff = asOf ?? DateTimeOffset.UtcNow;
+
+        var accounts = await dbContext.Accounts.AsNoTracking().OrderBy(a => a.Code).ToListAsync(cancellationToken);
+
+        var totals = await (
+            from jl in dbContext.JournalLines.AsNoTracking()
+            join je in dbContext.JournalEntries.AsNoTracking() on jl.JournalEntryId equals je.Id
+            where je.PostedAt <= cutoff
+            group jl by jl.AccountId into g
+            select new { AccountId = g.Key, TotalDebit = g.Sum(x => x.Debit), TotalCredit = g.Sum(x => x.Credit) }
+        ).ToDictionaryAsync(x => x.AccountId, cancellationToken);
+
+        var rows = accounts
+            .Select(a =>
+            {
+                var t = totals.GetValueOrDefault(a.Id);
+                var debit = t?.TotalDebit ?? 0m;
+                var credit = t?.TotalCredit ?? 0m;
+                // Asset/Expense are debit-normal; Liability/Equity/Revenue are credit-normal.
+                var balance = a.Type is AccountType.Asset or AccountType.Expense ? debit - credit : credit - debit;
+                return new TrialBalanceRow(a.Code, a.Name, a.Type, debit, credit, balance);
+            })
+            .Where(r => r.TotalDebit != 0 || r.TotalCredit != 0)
+            .ToList();
+
+        return new TrialBalanceResult(cutoff, rows, rows.Sum(r => r.TotalDebit), rows.Sum(r => r.TotalCredit));
+    }
+
+    public async Task<CashFlowResult> GetCashFlowAsync(
+        Guid businessId, string? range = null, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+
+        var (rangeKey, rangeStart, rangeEnd) = ReportDateRangeResolver.Resolve(range, from, to);
+
+        var query =
+            from jl in dbContext.JournalLines.AsNoTracking()
+            join je in dbContext.JournalEntries.AsNoTracking() on jl.JournalEntryId equals je.Id
+            join a in dbContext.Accounts.AsNoTracking() on jl.AccountId equals a.Id
+            where LedgerAccountCodes.CashEquivalentCodes.Contains(a.Code)
+            select new { je.PostedAt, je.Currency, je.SourceType, jl.Debit, jl.Credit };
+
+        if (rangeStart is not null)
+        {
+            query = query.Where(x => x.PostedAt >= rangeStart);
+        }
+        if (rangeEnd is not null)
+        {
+            query = query.Where(x => x.PostedAt <= rangeEnd);
+        }
+
+        var rows = await query.ToListAsync(cancellationToken);
+
+        // Cash-flow buckets are only useful with a bounded axis — "all" gets a monthly bucket
+        // instead of an unbounded daily one (unlike InsightsTools, which just skips its trend
+        // entirely for "all"; an empty cash-flow view for "all time" would defeat the report).
+        var bucketMonthly = rangeKey == "all";
+
+        var groups = rows.Select(r => r.Currency).Distinct().OrderBy(c => c).Select(currency =>
+        {
+            var currencyRows = rows.Where(r => r.Currency == currency).ToList();
+
+            var buckets = currencyRows
+                .GroupBy(r => bucketMonthly
+                    ? new DateOnly(r.PostedAt.UtcDateTime.Year, r.PostedAt.UtcDateTime.Month, 1)
+                    : DateOnly.FromDateTime(r.PostedAt.UtcDateTime))
+                .Select(g => new CashFlowBucket(g.Key, g.Sum(x => x.Debit), g.Sum(x => x.Credit), g.Sum(x => x.Debit - x.Credit)))
+                .OrderBy(b => b.PeriodStart)
+                .ToList();
+
+            var inflow = currencyRows.Where(x => x.Debit > 0).GroupBy(x => x.SourceType)
+                .Select(g => new CashFlowBreakdownItem(g.Key, g.Sum(x => x.Debit))).OrderByDescending(x => x.Amount).ToList();
+            var outflow = currencyRows.Where(x => x.Credit > 0).GroupBy(x => x.SourceType)
+                .Select(g => new CashFlowBreakdownItem(g.Key, g.Sum(x => x.Credit))).OrderByDescending(x => x.Amount).ToList();
+
+            return new CashFlowCurrencyGroup(currency, buckets, inflow, outflow, currencyRows.Sum(x => x.Debit - x.Credit));
+        }).ToList();
+
+        return new CashFlowResult(rangeKey, rangeStart, rangeEnd, groups);
+    }
 }

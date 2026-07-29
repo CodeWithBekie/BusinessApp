@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AiBusinessPlatform.Infrastructure.Tools;
 
-public class ExpenseTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantProvider tenantProvider) : IExpenseTools
+public class ExpenseTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantProvider tenantProvider, ILedgerPostingService ledgerPostingService) : IExpenseTools
 {
     public async Task<IReadOnlyList<ExpenseSummary>> ListExpensesAsync(
         Guid businessId, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken cancellationToken = default)
@@ -70,6 +70,10 @@ public class ExpenseTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
             CreatedAt = DateTimeOffset.UtcNow
         };
         dbContext.Expenses.Add(expense);
+
+        await ledgerPostingService.PostExpenseAsync(
+            businessId, expense.Id, expense.Category, expense.PaymentMethod, expense.Amount, expense.Currency, expense.IncurredAt, cancellationToken);
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return new ExpenseSummary(expense.Id, expense.Category, expense.Description, expense.Amount, expense.Currency, expense.PaymentMethod, expense.IncurredAt, expense.CreatedAt);

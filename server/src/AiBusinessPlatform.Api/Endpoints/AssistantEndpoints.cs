@@ -16,9 +16,11 @@ public static class AssistantEndpoints
     private const string SystemPrompt =
         "You are the \"AI Business Brain\" — a conversational assistant for the business owner " +
         "viewing this dashboard (Section 10.2/6.3 FR21), covering catalog, orders, approvals, sales, " +
-        "and their own uploaded documents. You are NOT the customer-facing WhatsApp ordering " +
-        "assistant — you talk to the owner, not their customers. Behave like a knowledgeable, " +
-        "conversational coworker (not a rigid script), but follow these rules strictly:\n" +
+        "financial reports (profit & loss, cash up, cash flow, trial balance, general ledger, " +
+        "expenses), and their own uploaded documents. You are NOT the customer-facing WhatsApp " +
+        "ordering assistant — you talk to the owner, not their customers. Behave like a " +
+        "knowledgeable, conversational coworker (not a rigid script), but follow these rules " +
+        "strictly:\n" +
         "1. Before stating any fact about the business (sales figures, catalog items, order status, " +
         "pending approvals), call the relevant query tool first — never guess or make up numbers.\n" +
         "2. Only call a mutating tool (create_catalog_item, update_catalog_item, mark_order_fulfilled, " +
@@ -31,8 +33,23 @@ public static class AssistantEndpoints
         "returns relevant content, answer using only that content and end with a citation line in " +
         "the form \"(Source: <document title>)\" for each document used. If nothing relevant comes " +
         "back, say so honestly rather than guessing.\n" +
-        "5. Be concise but conversational — this is a business owner chatting with their own " +
+        "5. For financial questions (profit, revenue, cash position, expenses, account balances), " +
+        "call the relevant report tool (get_profit_and_loss, get_cash_up, get_cash_flow, " +
+        "get_trial_balance, get_general_ledger, list_expenses) before answering — these appear " +
+        "automatically as citations alongside your reply, so mention which report/period you used " +
+        "in plain language (e.g. \"per this month's P&L\").\n" +
+        "6. Be concise but conversational — this is a business owner chatting with their own " +
         "assistant, not filling out a form.";
+
+    private static readonly IReadOnlyDictionary<string, string> FinancialToolLabels = new Dictionary<string, string>
+    {
+        ["get_profit_and_loss"] = "Profit & Loss",
+        ["get_cash_up"] = "Cash Up",
+        ["get_cash_flow"] = "Cash Flow",
+        ["get_trial_balance"] = "Trial Balance",
+        ["get_general_ledger"] = "General Ledger",
+        ["list_expenses"] = "Expenses",
+    };
 
     // Section 10.2/10.7 FR21 — real streaming "AI Business Brain" chat. The Assistant is itself an
     // MCP client of the platform's own MCP server (AiBusinessPlatform.Mcp): it forwards the
@@ -157,7 +174,7 @@ public static class AssistantEndpoints
 
                 var chatOptions = new ChatOptions { Tools = mcpTools.Select(t => (AITool)t).ToList() };
 
-                var citedDocumentTitles = new List<string>();
+                var citations = new List<string>();
                 var toolsUsed = new List<string>();
 
                 await foreach (var update in chatClient.GetStreamingResponseAsync(history, chatOptions, cancellationToken))
@@ -175,25 +192,68 @@ public static class AssistantEndpoints
                                 {
                                     toolsUsed.Add(call.Name);
                                 }
+                                // Financial reports have no natural "title" a result could carry the
+                                // way documents do — build the citation from what was asked (the
+                                // call's own arguments) rather than the result.
+                                if (FinancialToolLabels.TryGetValue(call.Name, out var label))
+                                {
+                                    var citation = BuildFinancialCitation(label, call.Arguments);
+                                    if (!citations.Contains(citation))
+                                    {
+                                        citations.Add(citation);
+                                    }
+                                }
                                 break;
 
                             case FunctionResultContent { Result: not null } result when toolsUsed.Contains("search_business_documents"):
                                 // Best-effort citation extraction from the raw tool result JSON —
                                 // the MCP tool result comes back as a string, not the strongly-typed
                                 // RetrievedDocumentChunk list the in-process version used.
-                                TryExtractDocumentTitles(result.Result, citedDocumentTitles);
+                                TryExtractDocumentTitles(result.Result, citations);
                                 break;
                         }
                     }
                 }
 
-                await WriteSseAsync(response, new { type = "done", citations = citedDocumentTitles, toolsUsed }, cancellationToken);
+                await WriteSseAsync(response, new { type = "done", citations, toolsUsed }, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 await WriteSseAsync(response, new { type = "error", message = ex.Message }, cancellationToken);
             }
         }).RequireAuthorization("BusinessOnly");
+    }
+
+    // Builds a citation label directly from a financial tool call's own arguments (e.g.
+    // "Profit & Loss (range: 7d)", "Cash Up (2026-07-28)") — checked in the order a caller is
+    // actually likely to supply them, falling back to the bare label if none match.
+    private static string BuildFinancialCitation(string label, IDictionary<string, object?>? arguments)
+    {
+        if (arguments is null)
+        {
+            return label;
+        }
+        if (arguments.TryGetValue("date", out var date) && date is not null)
+        {
+            return $"{label} ({date})";
+        }
+        if (arguments.TryGetValue("asOf", out var asOf) && asOf is not null)
+        {
+            return $"{label} (as of {asOf})";
+        }
+        if (arguments.TryGetValue("from", out var from) && arguments.TryGetValue("to", out var to) && from is not null && to is not null)
+        {
+            return $"{label} ({from} to {to})";
+        }
+        if (arguments.TryGetValue("range", out var range) && range is not null)
+        {
+            return $"{label} (range: {range})";
+        }
+        if (arguments.TryGetValue("accountCode", out var accountCode) && accountCode is not null)
+        {
+            return $"{label} ({accountCode})";
+        }
+        return label;
     }
 
     // The MCP result payload for search_business_documents is a JSON-serialized

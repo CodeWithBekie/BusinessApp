@@ -37,3 +37,5 @@ public enum McpIntegrationAccountStatus { Active, Revoked }
 public enum PurchaseOrderStatus { Draft, Ordered, Received, Cancelled }
 
 public enum ExpenseCategory { Rent, Utilities, Wages, Supplies, Transport, Marketing, Other }
+
+public enum AccountType { Asset, Liability, Equity, Revenue, Expense }

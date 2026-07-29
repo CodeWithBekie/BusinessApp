@@ -31,6 +31,27 @@ public static class AccountingEndpoints
             }
         });
 
+        accounting.MapGet("/general-ledger", async (
+            string? accountCode, DateTimeOffset? from, DateTimeOffset? to, IAccountingTools accountingTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+            Results.Ok(await accountingTools.GetGeneralLedgerAsync(tenantProvider.CurrentBusinessId, accountCode, from, to, ct)));
+
+        accounting.MapGet("/trial-balance", async (
+            DateTimeOffset? asOf, IAccountingTools accountingTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+            Results.Ok(await accountingTools.GetTrialBalanceAsync(tenantProvider.CurrentBusinessId, asOf, ct)));
+
+        accounting.MapGet("/cash-flow", async (
+            string? range, DateTimeOffset? from, DateTimeOffset? to, IAccountingTools accountingTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await accountingTools.GetCashFlowAsync(tenantProvider.CurrentBusinessId, range, from, to, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        });
+
         var expenses = app.MapGroup("/api/expenses")
             .RequireAuthorization("BusinessOnly", "Permission:ViewAccounting");
 
