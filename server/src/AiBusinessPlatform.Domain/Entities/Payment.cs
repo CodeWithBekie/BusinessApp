@@ -21,6 +21,13 @@ public class Payment : ITenantScoped
     // given back; ChangeDue is computed at read time (AmountTendered - Amount), never persisted.
     public decimal? AmountTendered { get; set; }
 
+    // Customer-uploaded proof of an off-gateway payment (bank/EcoCash transfer screenshot),
+    // reviewed via the same PendingApproval mechanism as cancel_paid_order — no separate
+    // "AwaitingReview" PaymentStatus needed, the approval row's own status is the review signal.
+    public byte[]? ProofImageData { get; set; }
+    public string? ProofImageContentType { get; set; }
+    public DateTimeOffset? ProofSubmittedAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? ConfirmedAt { get; set; }
 }

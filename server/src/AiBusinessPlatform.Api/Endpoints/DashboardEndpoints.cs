@@ -541,8 +541,39 @@ public static class DashboardEndpoints
                     await messagingTools.SendApprovedCustomerMessageAsync(tenantProvider.CurrentBusinessId, details.CustomerId, details.DraftedText, ct);
                 }
             }
+            else if (!decision.WasAlreadyDecided && decision.ActionType == ApprovalActionTypes.PaymentProofSubmitted)
+            {
+                var details = JsonSerializer.Deserialize<PaymentProofSubmittedDetails>(decision.DetailsJson)!;
+                if (approve)
+                {
+                    await orderTools.ConfirmManualPaymentProofAsync(tenantProvider.CurrentBusinessId, details.OrderId, decidedBy, ct);
+                }
+                // On reject: leave the order Invoiced/unpaid — the customer can retry via EcoCash
+                // or a fresh proof upload.
+            }
 
             return Results.Ok(decision);
+        }).RequireAuthorization("Permission:DecideApprovals");
+
+        // The proof image itself is a private financial document (unlike the catalog-item image
+        // GET, which is deliberately AllowAnonymous) — returned as base64 JSON rather than a raw
+        // image response, since a bearer token can't be attached to an <Image> tag's src; fetched
+        // only when the business expands a payment_proof_submitted approval card.
+        api.MapGet("/payments/{paymentId:guid}/proof-image", async (
+            Guid paymentId, AiBusinessPlatformDbContext db, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            var image = await db.Payments.AsNoTracking()
+                .Where(p => p.Id == paymentId && p.BusinessId == tenantProvider.CurrentBusinessId)
+                .Select(p => new { p.ProofImageData, p.ProofImageContentType })
+                .FirstOrDefaultAsync(ct);
+
+            if (image?.ProofImageData is null)
+            {
+                return Results.NotFound();
+            }
+
+            var dataUri = $"data:{image.ProofImageContentType ?? "application/octet-stream"};base64,{Convert.ToBase64String(image.ProofImageData)}";
+            return Results.Ok(new { dataUri });
         }).RequireAuthorization("Permission:DecideApprovals");
 
         // Section 10.6/12.3 — document upload for RAG. Plain-text body only this pass, no

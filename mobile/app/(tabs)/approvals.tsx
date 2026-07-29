@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
 import { apiClient, PendingApproval } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
@@ -27,16 +27,27 @@ interface SendCustomerMessageDetails {
   RequestedAt: string;
 }
 
-// Two action types today (Section 10.5, Part 3) — each parsed for a readable summary.
+interface PaymentProofSubmittedDetails {
+  OrderId: string;
+  PaymentId: string;
+  CustomerAccountId: string;
+  SubmittedAt: string;
+}
+
+// Three action types today (Section 10.5, Part 3) — each parsed for a readable summary.
 // Unrecognized action types fall back to raw JSON rather than crashing, so this survives a new
 // action type being added on the backend before the mobile app is updated to understand it.
-function describeDetails(actionType: string, detailsJson: string): { title: string; parsed: CancelPaidOrderDetails | null } {
+function describeDetails(
+  actionType: string,
+  detailsJson: string
+): { title: string; parsed: CancelPaidOrderDetails | null; paymentProof: PaymentProofSubmittedDetails | null } {
   if (actionType === 'cancel_paid_order') {
     try {
       const details = JSON.parse(detailsJson) as CancelPaidOrderDetails;
       return {
         title: `Cancel paid order — ${details.Currency} ${details.Amount}${details.Reason ? ` (${details.Reason})` : ''}`,
         parsed: details,
+        paymentProof: null,
       };
     } catch {
       // fall through to raw JSON below
@@ -45,12 +56,20 @@ function describeDetails(actionType: string, detailsJson: string): { title: stri
   if (actionType === 'send_customer_message') {
     try {
       const details = JSON.parse(detailsJson) as SendCustomerMessageDetails;
-      return { title: `Send WhatsApp message — "${details.DraftedText}"`, parsed: null };
+      return { title: `Send WhatsApp message — "${details.DraftedText}"`, parsed: null, paymentProof: null };
     } catch {
       // fall through to raw JSON below
     }
   }
-  return { title: detailsJson, parsed: null };
+  if (actionType === 'payment_proof_submitted') {
+    try {
+      const details = JSON.parse(detailsJson) as PaymentProofSubmittedDetails;
+      return { title: `Payment proof submitted for order #${details.OrderId.slice(0, 8)}`, parsed: null, paymentProof: details };
+    } catch {
+      // fall through to raw JSON below
+    }
+  }
+  return { title: detailsJson, parsed: null, paymentProof: null };
 }
 
 function StatusBadge({ status }: { status: ApprovalStatus }) {
@@ -86,6 +105,31 @@ export default function ApprovalsScreen() {
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{ item: PendingApproval; decision: Decision } | null>(null);
+  const [expandedProofItemId, setExpandedProofItemId] = useState<string | null>(null);
+  const [proofDataUri, setProofDataUri] = useState<string | null>(null);
+  const [loadingProof, setLoadingProof] = useState(false);
+
+  const toggleProof = useCallback(
+    async (item: PendingApproval, paymentId: string) => {
+      if (expandedProofItemId === item.id) {
+        setExpandedProofItemId(null);
+        setProofDataUri(null);
+        return;
+      }
+      setExpandedProofItemId(item.id);
+      setProofDataUri(null);
+      setLoadingProof(true);
+      try {
+        const { dataUri } = await apiClient.getPaymentProofImage(paymentId);
+        setProofDataUri(dataUri);
+      } catch (err) {
+        setActionError((err as Error).message);
+      } finally {
+        setLoadingProof(false);
+      }
+    },
+    [expandedProofItemId]
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -131,7 +175,7 @@ export default function ApprovalsScreen() {
 
       {!error &&
         visibleItems.map((item) => {
-          const { title } = describeDetails(item.actionType, item.detailsJson);
+          const { title, paymentProof } = describeDetails(item.actionType, item.detailsJson);
           return (
             <View key={item.id} style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
               <View style={styles.cardTopRow} lightColor="transparent" darkColor="transparent">
@@ -142,6 +186,21 @@ export default function ApprovalsScreen() {
                 Requested {formatRelativeDate(item.requestedAt)}
                 {item.decidedAt ? ` · Decided ${formatRelativeDate(item.decidedAt)}` : ''}
               </Text>
+              {paymentProof && (
+                <>
+                  <Pressable style={styles.inlineEditButton} onPress={() => toggleProof(item, paymentProof.PaymentId)}>
+                    <Text style={styles.inlineEditButtonText}>
+                      {expandedProofItemId === item.id ? 'Hide proof' : 'View proof'}
+                    </Text>
+                  </Pressable>
+                  {expandedProofItemId === item.id && (
+                    <>
+                      {loadingProof && <ActivityIndicator style={styles.loading} />}
+                      {proofDataUri && <Image source={{ uri: proofDataUri }} style={styles.proofImage} resizeMode="contain" />}
+                    </>
+                  )}
+                </>
+              )}
               {item.status === 'Pending' && canDecideApprovals && (
                 <>
                   <View style={styles.actions} lightColor="transparent" darkColor="transparent">
@@ -225,6 +284,9 @@ const styles = StyleSheet.create({
   approveButton: { backgroundColor: '#2e7d32' },
   rejectButton: { backgroundColor: '#c0392b' },
   buttonText: { color: '#fff', fontWeight: '600' },
+  inlineEditButton: { marginTop: 10 },
+  inlineEditButtonText: { color: '#007aff', fontWeight: '600', fontSize: 13 },
+  proofImage: { width: '100%', height: 240, marginTop: 10, borderRadius: 8, backgroundColor: '#eee' },
   offlineNotice: { color: '#c0392b', fontSize: 12, marginTop: 8 },
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },

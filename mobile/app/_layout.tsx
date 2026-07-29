@@ -95,6 +95,7 @@ function RootLayoutNav() {
           <Stack.Screen name="(customer)" options={{ headerShown: false }} />
           <Stack.Screen name="business/[id]" options={{ title: 'Storefront' }} />
           <Stack.Screen name="checkout" options={{ title: 'Checkout', presentation: 'modal' }} />
+          <Stack.Screen name="customer-order/[id]" options={{ title: 'Order' }} />
         </Stack>
       )}
     </ThemeProvider>

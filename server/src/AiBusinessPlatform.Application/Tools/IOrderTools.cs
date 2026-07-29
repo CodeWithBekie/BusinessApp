@@ -66,8 +66,13 @@ public interface IOrderTools
     // documents (no structured tool-result data survives across conversation turns, only
     // plain-text history is persisted/reloaded). Never cancels/refunds anything itself — only
     // raises a PendingApproval via IApprovalTools (Section 10.5).
+    // orderId is optional so the WhatsApp orchestrator (which has no stable "which order" signal
+    // across conversation turns — see ICatalogTools.ReleaseStockAsync's own rationale) can keep
+    // resolving "the customer's most recent Paid order" implicitly; the marketplace mobile app,
+    // which already knows exactly which order the customer tapped, passes it explicitly instead —
+    // more precise when a customer has more than one Paid order.
     [Description("Use when a customer wants to cancel an order or get a refund for an order that has ALREADY been paid (not a Quoted/unpaid order — use release_stock_reservation for those). Raises an approval request for the business owner instead of cancelling or refunding anything directly.")]
-    Task<OrderCancellationRequestResult> RequestOrderCancellationApprovalAsync(Guid businessId, Guid customerId, string reason, CancellationToken cancellationToken = default);
+    Task<OrderCancellationRequestResult> RequestOrderCancellationApprovalAsync(Guid businessId, Guid customerId, string reason, Guid? orderId = null, CancellationToken cancellationToken = default);
 
     // Deliberately never exposed as an AI tool — only ever invoked by the dashboard approval
     // decision endpoint, after an explicit approval (Section 10.5).
@@ -75,6 +80,20 @@ public interface IOrderTools
 
     // Deliberately never exposed as an AI tool — same as above, for the rejection outcome.
     Task NotifyOrderCancellationRejectedAsync(Guid businessId, Guid orderId, Guid? decidedBy, CancellationToken cancellationToken = default);
+
+    // The marketplace-customer counterpart for an order that hasn't been paid yet (Quoted or
+    // Invoiced) — no approval needed since no money has moved. Restores stock for every line item
+    // and marks any stub Payment Failed. Not AI-facing (customerId is resolved server-side by the
+    // caller, IMarketplaceTools, from the authenticated CustomerAccount — never trust one supplied
+    // directly).
+    Task<OrderCancellationResult> CancelUnpaidOrderAsync(Guid businessId, Guid orderId, Guid customerId, CancellationToken cancellationToken = default);
+
+    // Finalizes a payment whose customer-uploaded proof was approved via the
+    // payment_proof_submitted PendingApproval — mirrors RecordManualPaymentAsync's tail (stock
+    // finalize, ledger post, receipt) but takes no fresh provider/reference/amount since those are
+    // already fixed on the Payment row from IMarketplaceTools.SubmitPaymentProofAsync. Deliberately
+    // never exposed as an AI tool — only ever invoked by the approval decision endpoint.
+    Task<OrderDetailSummary> ConfirmManualPaymentProofAsync(Guid businessId, Guid orderId, Guid? decidedBy, CancellationToken cancellationToken = default);
 
     // FR18 (Section 6.3) — owner manually marks a paid order as delivered/fulfilled. Exposed via
     // the MCP server's mark_order_fulfilled tool (Section 10.2/10.7) so the owner's own Assistant

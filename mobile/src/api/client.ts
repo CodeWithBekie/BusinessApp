@@ -252,6 +252,7 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ decision }),
     }),
+  getPaymentProofImage: (paymentId: string) => request<{ dataUri: string }>(`/api/payments/${paymentId}/proof-image`),
 
   getSuppliers: (search?: string) => request<Supplier[]>(`/api/suppliers${search ? `?search=${encodeURIComponent(search)}` : ''}`),
   createSupplier: (input: CreateSupplierInput) =>
@@ -357,6 +358,30 @@ export const apiClient = {
       body: JSON.stringify({ items }),
     }),
   getMyMarketplaceOrders: () => request<MarketplaceOrderSummary[]>('/api/marketplace/my-orders'),
+  getMyMarketplaceOrder: (orderId: string) => request<MarketplaceOrderDetail>(`/api/marketplace/orders/${orderId}`),
+  cancelMyOrder: (orderId: string) => request<{ orderId: string; status: OrderStatus }>(`/api/marketplace/orders/${orderId}/cancel`, { method: 'POST' }),
+  requestMyOrderCancellation: (orderId: string, reason?: string) =>
+    request(`/api/marketplace/orders/${orderId}/request-cancellation`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  payWithEcoCash: (orderId: string, phoneNumber: string) =>
+    request<EcoCashPaymentResult>(`/api/marketplace/orders/${orderId}/pay/ecocash`, { method: 'POST', body: JSON.stringify({ phoneNumber }) }),
+  submitPaymentProof: async (orderId: string, uri: string, mimeType: string): Promise<void> => {
+    const formData = new FormData();
+    if (Platform.OS === 'web') {
+      const blob = await (await fetch(uri)).blob();
+      formData.append('file', blob, `proof.${mimeType.split('/')[1] ?? 'jpg'}`);
+    } else {
+      formData.append('file', { uri, name: `proof.${mimeType.split('/')[1] ?? 'jpg'}`, type: mimeType } as unknown as Blob);
+    }
+    const response = await fetch(`${API_BASE_URL}/api/marketplace/orders/${orderId}/payment-proof`, {
+      method: 'PUT',
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+      body: formData,
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`API request to /api/marketplace/orders/${orderId}/payment-proof failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`);
+    }
+  },
 
   getStaff: () => request<StaffSummary[]>('/api/staff'),
   inviteStaff: (input: InviteStaffInput) =>
@@ -411,6 +436,32 @@ export interface MarketplaceOrderSummary {
   itemCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+// CanCancelDirectly/CanRequestCancellation/IsPaynowConnected are computed server-side so this
+// screen doesn't have to re-derive the same status logic as the server.
+export interface MarketplaceOrderDetail {
+  orderId: string;
+  businessId: string;
+  businessName: string;
+  status: OrderStatus;
+  totalAmount: number;
+  vatAmount: number;
+  invoiceNumber: number | null;
+  currency: string;
+  items: OrderLineItem[];
+  payment: OrderPayment | null;
+  canCancelDirectly: boolean;
+  canRequestCancellation: boolean;
+  isPaynowConnected: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EcoCashPaymentResult {
+  paymentReference: string;
+  instructions: string | null;
+  pollUrl: string | null;
 }
 
 export type BusinessUserRole = 'Owner' | 'Manager' | 'Cashier' | 'InventoryClerk' | 'Accountant';

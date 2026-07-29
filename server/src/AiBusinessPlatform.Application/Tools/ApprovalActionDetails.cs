@@ -9,6 +9,7 @@ public static class ApprovalActionTypes
 {
     public const string CancelPaidOrder = "cancel_paid_order";
     public const string SendCustomerMessage = "send_customer_message";
+    public const string PaymentProofSubmitted = "payment_proof_submitted";
 }
 
 public record CancelPaidOrderDetails(Guid OrderId, Guid CustomerId, decimal Amount, string Currency, string? Reason, DateTimeOffset RequestedAt);
@@ -16,3 +17,7 @@ public record CancelPaidOrderDetails(Guid OrderId, Guid CustomerId, decimal Amou
 // The draft_customer_message MCP tool (Part 3, sampling) raises this instead of sending directly —
 // only approving it (dashboard or decide_approval) actually sends via WhatsApp.
 public record SendCustomerMessageDetails(Guid CustomerId, string DraftedText, DateTimeOffset RequestedAt);
+
+// Raised by IMarketplaceTools.SubmitPaymentProofAsync — the proof image itself lives on the
+// Payment row (Payment.ProofImageData), not here; this just carries enough to route the decision.
+public record PaymentProofSubmittedDetails(Guid OrderId, Guid PaymentId, Guid CustomerAccountId, DateTimeOffset SubmittedAt);

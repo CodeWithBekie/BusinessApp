@@ -1,6 +1,6 @@
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet } from 'react-native';
 
 import { apiClient, MarketplaceOrderSummary, OrderStatus } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
@@ -18,20 +18,22 @@ function StatusBadge({ status }: { status: OrderStatus }) {
 
 function OrderCard({ order }: { order: MarketplaceOrderSummary }) {
   return (
-    <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
-      <View style={styles.cardTopRow} lightColor="transparent" darkColor="transparent">
-        <Text style={styles.businessName} numberOfLines={1}>
-          {order.businessName}
-        </Text>
-        <StatusBadge status={order.status} />
+    <Pressable onPress={() => router.push({ pathname: '/customer-order/[id]', params: { id: order.orderId } })}>
+      <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+        <View style={styles.cardTopRow} lightColor="transparent" darkColor="transparent">
+          <Text style={styles.businessName} numberOfLines={1}>
+            {order.businessName}
+          </Text>
+          <StatusBadge status={order.status} />
+        </View>
+        <View style={styles.cardBottomRow} lightColor="transparent" darkColor="transparent">
+          <Text style={styles.total}>{formatMoney(order.totalAmount, order.currency)}</Text>
+          <Text style={styles.meta}>
+            {order.itemCount} item{order.itemCount === 1 ? '' : 's'}
+          </Text>
+        </View>
       </View>
-      <View style={styles.cardBottomRow} lightColor="transparent" darkColor="transparent">
-        <Text style={styles.total}>{formatMoney(order.totalAmount, order.currency)}</Text>
-        <Text style={styles.meta}>
-          {order.itemCount} item{order.itemCount === 1 ? '' : 's'}
-        </Text>
-      </View>
-    </View>
+    </Pressable>
   );
 }
 

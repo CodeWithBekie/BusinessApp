@@ -15,7 +15,8 @@ public class OrderTools(
     ICatalogTools catalogTools,
     IApprovalTools approvalTools,
     IPaymentTools paymentTools,
-    IWhatsAppMessageService whatsAppMessageService) : IOrderTools
+    IWhatsAppMessageService whatsAppMessageService,
+    ILedgerPostingService ledgerPostingService) : IOrderTools
 {
     public async Task<InvoiceResult> CreateInvoiceAsync(Guid businessId, Guid customerId, CancellationToken cancellationToken = default)
     {
@@ -131,6 +132,17 @@ public class OrderTools(
             CreatedAt = DateTimeOffset.UtcNow
         });
 
+        var costOfGoodsSold = await (
+            from oi in dbContext.OrderItems.AsNoTracking()
+            join ci in dbContext.CatalogItems.AsNoTracking() on oi.CatalogItemId equals ci.Id
+            where oi.OrderId == order.Id
+            select oi.Quantity * (ci.Cost ?? 0)
+        ).SumAsync(cancellationToken);
+
+        await ledgerPostingService.PostSaleAsync(
+            businessId, order.Id, payment.Provider, payment.Amount, order.VatAmount, order.Currency,
+            costOfGoodsSold, payment.ConfirmedAt!.Value, cancellationToken);
+
         // Deterministic, templated receipt — never model-generated, since a financial
         // confirmation shouldn't be phrased by a non-deterministic LLM.
         await SendCustomerMessageAsync(order.CustomerId, $"Receipt: Order {order.Id} paid — {order.TotalAmount} {order.Currency}. Thank you!", cancellationToken);
@@ -220,6 +232,17 @@ public class OrderTools(
             CreatedAt = DateTimeOffset.UtcNow
         });
 
+        var costOfGoodsSold = await (
+            from oi in dbContext.OrderItems.AsNoTracking()
+            join ci in dbContext.CatalogItems.AsNoTracking() on oi.CatalogItemId equals ci.Id
+            where oi.OrderId == order.Id
+            select oi.Quantity * (ci.Cost ?? 0)
+        ).SumAsync(cancellationToken);
+
+        await ledgerPostingService.PostSaleAsync(
+            businessId, order.Id, payment.Provider, payment.Amount, order.VatAmount, order.Currency,
+            costOfGoodsSold, payment.ConfirmedAt!.Value, cancellationToken);
+
         await SendCustomerMessageAsync(order.CustomerId, $"Receipt: Order {order.Id} paid — {order.TotalAmount} {order.Currency}. Thank you!", cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -268,19 +291,21 @@ public class OrderTools(
         return await GetOrderAsync(businessId, order.Id, cancellationToken);
     }
 
-    public async Task<OrderCancellationRequestResult> RequestOrderCancellationApprovalAsync(Guid businessId, Guid customerId, string reason, CancellationToken cancellationToken = default)
+    public async Task<OrderCancellationRequestResult> RequestOrderCancellationApprovalAsync(Guid businessId, Guid customerId, string reason, Guid? orderId = null, CancellationToken cancellationToken = default)
     {
         if (businessId != tenantProvider.CurrentBusinessId)
         {
             throw new InvalidOperationException("businessId does not match the current tenant context.");
         }
 
-        // Phase 0 simplification: picks the customer's most recent Paid order — a customer with
-        // more than one Paid order can only request cancellation of the latest this way.
-        var order = await dbContext.Orders
-            .Where(o => o.CustomerId == customerId && o.Status == OrderStatus.Paid)
-            .OrderByDescending(o => o.UpdatedAt)
-            .FirstOrDefaultAsync(cancellationToken);
+        // orderId is supplied by the marketplace mobile app (which knows exactly which order was
+        // tapped); when null (the WhatsApp orchestrator, which has no stable cross-turn order
+        // reference), fall back to the Phase 0 simplification of picking the customer's most
+        // recent Paid order.
+        var query = dbContext.Orders.Where(o => o.CustomerId == customerId && o.Status == OrderStatus.Paid);
+        var order = orderId is not null
+            ? await query.FirstOrDefaultAsync(o => o.Id == orderId.Value, cancellationToken)
+            : await query.OrderByDescending(o => o.UpdatedAt).FirstOrDefaultAsync(cancellationToken);
 
         if (order is null)
         {
@@ -380,6 +405,142 @@ public class OrderTools(
         await SendCustomerMessageAsync(order.CustomerId, $"We're sorry, your request to cancel/refund order {order.Id} was not approved. Please contact us if you have questions.", cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<OrderCancellationResult> CancelUnpaidOrderAsync(Guid businessId, Guid orderId, Guid customerId, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+
+        var order = await dbContext.Orders.FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId, cancellationToken)
+            ?? throw new InvalidOperationException($"Order {orderId} not found.");
+
+        // Idempotent — a retried call must not double-restore stock.
+        if (order.Status == OrderStatus.Cancelled)
+        {
+            return new OrderCancellationResult(order.Id, order.Status);
+        }
+
+        if (order.Status is not (OrderStatus.Quoted or OrderStatus.Invoiced))
+        {
+            throw new InvalidOperationException($"Order {orderId} is {order.Status} — only Quoted/Invoiced orders can be cancelled this way (use request-cancellation for a Paid order).");
+        }
+
+        var orderItems = await dbContext.OrderItems.Where(oi => oi.OrderId == order.Id).ToListAsync(cancellationToken);
+        var catalogItemIds = orderItems.Select(oi => oi.CatalogItemId).ToList();
+        var catalogItems = await dbContext.CatalogItems
+            .Where(c => catalogItemIds.Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, cancellationToken);
+
+        foreach (var item in orderItems)
+        {
+            if (catalogItems.TryGetValue(item.CatalogItemId, out var catalogItem) && catalogItem.StockQuantity is not null)
+            {
+                catalogItem.StockQuantity += item.Quantity;
+                catalogItem.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+        }
+
+        if (order.Status == OrderStatus.Invoiced)
+        {
+            var payment = await dbContext.Payments.FirstOrDefaultAsync(p => p.OrderId == order.Id, cancellationToken);
+            if (payment is not null)
+            {
+                payment.Status = PaymentStatus.Failed; // never completed
+            }
+        }
+
+        var previousStatus = order.Status;
+        order.Status = OrderStatus.Cancelled;
+        order.UpdatedAt = DateTimeOffset.UtcNow;
+
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            BusinessId = tenantProvider.CurrentBusinessId,
+            ActorType = AuditActorType.User,
+            ActorId = "customer-marketplace",
+            Action = "order.cancelled_by_customer",
+            EntityType = nameof(Order),
+            EntityId = order.Id.ToString(),
+            BeforeStateJson = JsonSerializer.Serialize(new { Status = previousStatus.ToString() }),
+            AfterStateJson = JsonSerializer.Serialize(new { Status = order.Status.ToString() }),
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new OrderCancellationResult(order.Id, order.Status);
+    }
+
+    public async Task<OrderDetailSummary> ConfirmManualPaymentProofAsync(Guid businessId, Guid orderId, Guid? decidedBy, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+
+        var order = await dbContext.Orders.FirstOrDefaultAsync(o => o.Id == orderId, cancellationToken)
+            ?? throw new InvalidOperationException($"Order {orderId} not found.");
+
+        // Idempotent — a retried decision-endpoint call must not re-finalize/re-post the ledger.
+        if (order.Status == OrderStatus.Paid)
+        {
+            return await GetOrderAsync(businessId, order.Id, cancellationToken);
+        }
+        if (order.Status != OrderStatus.Invoiced)
+        {
+            throw new InvalidOperationException($"Order {orderId} is {order.Status} — cannot confirm a payment proof for it.");
+        }
+
+        var payment = await dbContext.Payments.FirstOrDefaultAsync(p => p.OrderId == order.Id && p.Status == PaymentStatus.Pending, cancellationToken)
+            ?? throw new InvalidOperationException($"Order {orderId} has no pending payment to confirm.");
+
+        var orderItems = await dbContext.OrderItems.Where(oi => oi.OrderId == order.Id).ToListAsync(cancellationToken);
+        foreach (var item in orderItems)
+        {
+            // Validation checkpoint only — stock was already decremented at reserve time.
+            await catalogTools.FinalizeStockAsync(businessId, item.Id, cancellationToken);
+        }
+
+        payment.Status = PaymentStatus.Confirmed;
+        payment.ConfirmedAt = DateTimeOffset.UtcNow;
+
+        var previousStatus = order.Status;
+        order.Status = OrderStatus.Paid;
+        order.UpdatedAt = DateTimeOffset.UtcNow;
+
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            BusinessId = tenantProvider.CurrentBusinessId,
+            ActorType = AuditActorType.User,
+            ActorId = decidedBy?.ToString() ?? "unknown-dev-decision",
+            Action = "payment.proof_confirmed",
+            EntityType = nameof(Order),
+            EntityId = order.Id.ToString(),
+            BeforeStateJson = JsonSerializer.Serialize(new { Status = previousStatus.ToString() }),
+            AfterStateJson = JsonSerializer.Serialize(new { Status = order.Status.ToString() }),
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        var costOfGoodsSold = await (
+            from oi in dbContext.OrderItems.AsNoTracking()
+            join ci in dbContext.CatalogItems.AsNoTracking() on oi.CatalogItemId equals ci.Id
+            where oi.OrderId == order.Id
+            select oi.Quantity * (ci.Cost ?? 0)
+        ).SumAsync(cancellationToken);
+
+        await ledgerPostingService.PostSaleAsync(
+            businessId, order.Id, payment.Provider, payment.Amount, order.VatAmount, order.Currency,
+            costOfGoodsSold, payment.ConfirmedAt.Value, cancellationToken);
+
+        await SendCustomerMessageAsync(order.CustomerId, $"Receipt: Order {order.Id} paid — {order.TotalAmount} {order.Currency}. Thank you!", cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return await GetOrderAsync(businessId, order.Id, cancellationToken);
     }
 
     public async Task<OrderFulfillmentResult> MarkOrderFulfilledAsync(Guid businessId, Guid orderId, Guid? decidedBy, CancellationToken cancellationToken = default)
@@ -644,6 +805,11 @@ public class OrderTools(
             AfterStateJson = JsonSerializer.Serialize(new { Status = order.Status.ToString(), order.TotalAmount, order.Currency }),
             CreatedAt = DateTimeOffset.UtcNow
         });
+
+        var costOfGoodsSold = items.Sum(line => line.Quantity * (catalogItems[line.CatalogItemId].Cost ?? 0));
+
+        await ledgerPostingService.PostSaleAsync(
+            businessId, order.Id, provider, grandTotal, totalVat, saleCurrency!, costOfGoodsSold, payment.ConfirmedAt!.Value, cancellationToken);
 
         const int maxReferenceAttempts = 5;
         for (var attempt = 1; ; attempt++)

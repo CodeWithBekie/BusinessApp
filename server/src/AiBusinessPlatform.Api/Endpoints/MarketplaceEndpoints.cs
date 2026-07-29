@@ -80,5 +80,140 @@ public static class MarketplaceEndpoints
 
             return Results.Ok(await marketplaceTools.ListMyOrdersAsync(customerAccountId.Value, ct));
         }).RequireAuthorization("CustomerOnly");
+
+        // Addressed as /orders/{orderId} (not nested under /businesses/{businessId}) so every
+        // handler below is forced through IMarketplaceTools' own server-side ownership check
+        // rather than trusting a client-supplied businessId.
+        marketplace.MapGet("/orders/{orderId:guid}", async (
+            Guid orderId, IMarketplaceTools marketplaceTools, ICurrentCustomerProvider customerProvider, CancellationToken ct) =>
+        {
+            var customerAccountId = customerProvider.CurrentCustomerAccountId;
+            if (customerAccountId is null)
+            {
+                return Results.Forbid();
+            }
+
+            try
+            {
+                return Results.Ok(await marketplaceTools.GetMyOrderAsync(orderId, customerAccountId.Value, ct));
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        }).RequireAuthorization("CustomerOnly");
+
+        marketplace.MapPost("/orders/{orderId:guid}/cancel", async (
+            Guid orderId, IMarketplaceTools marketplaceTools, ICurrentCustomerProvider customerProvider, CancellationToken ct) =>
+        {
+            var customerAccountId = customerProvider.CurrentCustomerAccountId;
+            if (customerAccountId is null)
+            {
+                return Results.Forbid();
+            }
+
+            try
+            {
+                return Results.Ok(await marketplaceTools.CancelMyOrderAsync(orderId, customerAccountId.Value, ct));
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        }).RequireAuthorization("CustomerOnly");
+
+        marketplace.MapPost("/orders/{orderId:guid}/request-cancellation", async (
+            Guid orderId, RequestCancellationRequest request, IMarketplaceTools marketplaceTools,
+            ICurrentCustomerProvider customerProvider, CancellationToken ct) =>
+        {
+            var customerAccountId = customerProvider.CurrentCustomerAccountId;
+            if (customerAccountId is null)
+            {
+                return Results.Forbid();
+            }
+
+            try
+            {
+                return Results.Ok(await marketplaceTools.RequestMyOrderCancellationAsync(orderId, customerAccountId.Value, request.Reason, ct));
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        }).RequireAuthorization("CustomerOnly");
+
+        marketplace.MapPost("/orders/{orderId:guid}/pay/ecocash", async (
+            Guid orderId, PayEcoCashRequest request, IMarketplaceTools marketplaceTools,
+            ICurrentCustomerProvider customerProvider, CancellationToken ct) =>
+        {
+            var customerAccountId = customerProvider.CurrentCustomerAccountId;
+            if (customerAccountId is null)
+            {
+                return Results.Forbid();
+            }
+            if (string.IsNullOrWhiteSpace(request.PhoneNumber))
+            {
+                return Results.BadRequest("phoneNumber is required.");
+            }
+
+            try
+            {
+                return Results.Ok(await marketplaceTools.PayWithEcoCashAsync(orderId, customerAccountId.Value, request.PhoneNumber.Trim(), ct));
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        }).RequireAuthorization("CustomerOnly");
+
+        var allowedProofContentTypes = new HashSet<string> { "image/jpeg", "image/png", "image/webp" };
+        const long maxProofBytes = 5 * 1024 * 1024;
+
+        marketplace.MapPut("/orders/{orderId:guid}/payment-proof", async (
+            Guid orderId, IFormFile file, IMarketplaceTools marketplaceTools, ICurrentCustomerProvider customerProvider, CancellationToken ct) =>
+        {
+            var customerAccountId = customerProvider.CurrentCustomerAccountId;
+            if (customerAccountId is null)
+            {
+                return Results.Forbid();
+            }
+            if (file.Length == 0)
+            {
+                return Results.BadRequest("A file is required.");
+            }
+            if (file.Length > maxProofBytes)
+            {
+                return Results.BadRequest("Image must be 5MB or smaller.");
+            }
+            if (!allowedProofContentTypes.Contains(file.ContentType))
+            {
+                return Results.BadRequest("Image must be JPEG, PNG, or WebP.");
+            }
+
+            using var stream = new MemoryStream();
+            await file.CopyToAsync(stream, ct);
+
+            try
+            {
+                await marketplaceTools.SubmitPaymentProofAsync(orderId, customerAccountId.Value, stream.ToArray(), file.ContentType, ct);
+                return Results.Ok();
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        }).RequireAuthorization("CustomerOnly").DisableAntiforgery();
     }
 }

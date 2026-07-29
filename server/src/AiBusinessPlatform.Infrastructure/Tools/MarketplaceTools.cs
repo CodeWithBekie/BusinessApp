@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
 using AiBusinessPlatform.Domain;
@@ -8,7 +9,8 @@ using Microsoft.EntityFrameworkCore;
 namespace AiBusinessPlatform.Infrastructure.Tools;
 
 public class MarketplaceTools(
-    AiBusinessPlatformDbContext dbContext, ICatalogTools catalogTools, IOrderTools orderTools, ICurrentTenantProvider tenantProvider)
+    AiBusinessPlatformDbContext dbContext, ICatalogTools catalogTools, IOrderTools orderTools, IPaymentTools paymentTools,
+    IApprovalTools approvalTools, ICurrentTenantProvider tenantProvider, ICurrentTenantSetter tenantSetter)
     : IMarketplaceTools
 {
     public async Task<IReadOnlyList<PublicBusinessSummary>> ListPubliclyListedBusinessesAsync(CancellationToken cancellationToken = default)
@@ -93,6 +95,121 @@ public class MarketplaceTools(
                 o.Id, o.BusinessId, businessNames.GetValueOrDefault(o.BusinessId, "Unknown business"), o.Status,
                 o.TotalAmount, o.VatAmount, o.Currency, itemCounts.GetValueOrDefault(o.Id, 0), o.CreatedAt, o.UpdatedAt))
             .ToList();
+    }
+
+    public async Task<MarketplaceOrderDetail> GetMyOrderAsync(Guid orderId, Guid customerAccountId, CancellationToken cancellationToken = default)
+    {
+        var order = await ResolveOwnedOrderAsync(orderId, customerAccountId, cancellationToken);
+
+        var detail = await orderTools.GetOrderAsync(order.BusinessId, orderId, cancellationToken);
+        var businessName = await dbContext.Businesses.AsNoTracking()
+            .Where(b => b.Id == order.BusinessId)
+            .Select(b => b.Name)
+            .FirstAsync(cancellationToken);
+        var isPaynowConnected = await dbContext.PaynowConnections.AnyAsync(c => c.BusinessId == order.BusinessId, cancellationToken);
+
+        return new MarketplaceOrderDetail(
+            detail.Id, order.BusinessId, businessName, detail.Status,
+            detail.TotalAmount, detail.VatAmount, detail.InvoiceNumber, detail.Currency,
+            detail.Items, detail.Payment,
+            CanCancelDirectly: detail.Status is OrderStatus.Quoted or OrderStatus.Invoiced,
+            CanRequestCancellation: detail.Status == OrderStatus.Paid,
+            IsPaynowConnected: isPaynowConnected,
+            detail.CreatedAt, detail.UpdatedAt);
+    }
+
+    public async Task<OrderCancellationResult> CancelMyOrderAsync(Guid orderId, Guid customerAccountId, CancellationToken cancellationToken = default)
+    {
+        var order = await ResolveOwnedOrderAsync(orderId, customerAccountId, cancellationToken);
+        return await orderTools.CancelUnpaidOrderAsync(order.BusinessId, orderId, order.CustomerId, cancellationToken);
+    }
+
+    public async Task<OrderCancellationRequestResult> RequestMyOrderCancellationAsync(Guid orderId, Guid customerAccountId, string? reason, CancellationToken cancellationToken = default)
+    {
+        var order = await ResolveOwnedOrderAsync(orderId, customerAccountId, cancellationToken);
+        return await orderTools.RequestOrderCancellationApprovalAsync(
+            order.BusinessId, order.CustomerId, reason ?? "Customer requested cancellation.", orderId, cancellationToken);
+    }
+
+    public async Task<EcoCashPaymentResult> PayWithEcoCashAsync(Guid orderId, Guid customerAccountId, string ecocashPhoneNumber, CancellationToken cancellationToken = default)
+    {
+        var order = await ResolveOwnedOrderAsync(orderId, customerAccountId, cancellationToken);
+
+        if (order.Status != OrderStatus.Invoiced)
+        {
+            throw new InvalidOperationException($"Order {orderId} is {order.Status} — EcoCash payment is only available for an unpaid, invoiced order.");
+        }
+
+        var payment = await dbContext.Payments.FirstOrDefaultAsync(p => p.OrderId == order.Id && p.Status == PaymentStatus.Pending, cancellationToken)
+            ?? throw new InvalidOperationException($"Order {orderId} has no pending payment to pay.");
+
+        var isPaynowConnected = await dbContext.PaynowConnections.AnyAsync(c => c.BusinessId == order.BusinessId, cancellationToken);
+        if (!isPaynowConnected)
+        {
+            throw new InvalidOperationException("EcoCash isn't available for this business yet — upload proof of payment instead.");
+        }
+
+        var paymentRequest = await paymentTools.CreatePaymentRequestAsync(
+            order.BusinessId, order.Id, order.TotalAmount, order.Currency, ecocashPhoneNumber, cancellationToken);
+
+        payment.Provider = PaymentProvider.EcoCash;
+        payment.ProviderReference = paymentRequest.PaymentReference;
+        payment.PollUrl = paymentRequest.PollUrl;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new EcoCashPaymentResult(paymentRequest.PaymentReference, paymentRequest.Instructions, paymentRequest.PollUrl);
+    }
+
+    public async Task SubmitPaymentProofAsync(Guid orderId, Guid customerAccountId, byte[] imageData, string contentType, CancellationToken cancellationToken = default)
+    {
+        var order = await ResolveOwnedOrderAsync(orderId, customerAccountId, cancellationToken);
+
+        if (order.Status != OrderStatus.Invoiced)
+        {
+            throw new InvalidOperationException($"Order {orderId} is {order.Status} — a payment proof can only be submitted for an unpaid, invoiced order.");
+        }
+
+        var payment = await dbContext.Payments.FirstOrDefaultAsync(p => p.OrderId == order.Id && p.Status == PaymentStatus.Pending, cancellationToken)
+            ?? throw new InvalidOperationException($"Order {orderId} has no pending payment to submit proof for.");
+
+        // Idempotent — don't raise a second review request while one is already pending.
+        var alreadyPending = await dbContext.PendingApprovals.AnyAsync(
+            a => a.BusinessId == order.BusinessId && a.ActionType == ApprovalActionTypes.PaymentProofSubmitted
+                && a.Status == ApprovalStatus.Pending && a.DetailsJson.Contains(orderId.ToString()),
+            cancellationToken);
+        if (alreadyPending)
+        {
+            return;
+        }
+
+        payment.ProofImageData = imageData;
+        payment.ProofImageContentType = contentType;
+        payment.ProofSubmittedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var details = new PaymentProofSubmittedDetails(order.Id, payment.Id, customerAccountId, DateTimeOffset.UtcNow);
+        await approvalTools.RequestApprovalAsync(order.BusinessId, ApprovalActionTypes.PaymentProofSubmitted, JsonSerializer.Serialize(details), cancellationToken);
+    }
+
+    // Resolves the caller's own linked Customer id(s) from the authenticated CustomerAccountId
+    // (never a client-supplied one — same pattern as ListMyOrdersAsync), then verifies the order
+    // actually belongs to one of them. Sets the tenant context from the verified order's own
+    // BusinessId — never from a client-supplied businessId — so downstream IOrderTools calls'
+    // "businessId != tenantProvider.CurrentBusinessId" guard passes legitimately.
+    private async Task<Order> ResolveOwnedOrderAsync(Guid orderId, Guid customerAccountId, CancellationToken cancellationToken)
+    {
+        var linkedCustomerIds = await dbContext.Customers.IgnoreQueryFilters()
+            .Where(c => c.CustomerAccountId == customerAccountId)
+            .Select(c => c.Id)
+            .ToListAsync(cancellationToken);
+
+        var order = await dbContext.Orders.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(o => o.Id == orderId && linkedCustomerIds.Contains(o.CustomerId), cancellationToken)
+            ?? throw new KeyNotFoundException($"Order {orderId} not found.");
+
+        tenantSetter.SetBusinessId(order.BusinessId);
+        return order;
     }
 
     private async Task<Customer> GetOrCreateLinkedCustomerAsync(Guid businessId, Guid customerAccountId, CancellationToken cancellationToken)
