@@ -19,6 +19,12 @@ import {
 } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Chip } from '@/components/ui/Chip';
+import { Section } from '@/components/ui/Section';
+import Colors from '@/constants/Colors';
+import { semanticColors, spacing, typography } from '@/constants/theme';
 import { formatMoney } from '@/src/common/format';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
 import { useIsOnline } from '@/src/offline/networkStatus';
@@ -36,17 +42,13 @@ function SectionTabs({ value, onChange }: { value: Section; onChange: (value: Se
     { value: 'expenses', label: 'Expenses' },
   ];
   return (
-    <View style={styles.sectionRow} lightColor="transparent" darkColor="transparent">
-      {options.map((option) => (
-        <Pressable
-          key={option.value}
-          onPress={() => onChange(option.value)}
-          style={[styles.sectionChip, value === option.value && styles.sectionChipActive]}
-        >
-          <Text style={[styles.sectionChipText, value === option.value && styles.sectionChipTextActive]}>{option.label}</Text>
-        </Pressable>
-      ))}
-    </View>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <View style={styles.sectionRow} lightColor="transparent" darkColor="transparent">
+        {options.map((option) => (
+          <Chip key={option.value} label={option.label} active={value === option.value} onPress={() => onChange(option.value)} />
+        ))}
+      </View>
+    </ScrollView>
   );
 }
 
@@ -139,28 +141,21 @@ function DateField({ label, value, onChange }: { label: string; value: Date | nu
 function RangeTabs({ value, onChange }: { value: FilterValue; onChange: (value: FilterValue) => void }) {
   return (
     <View style={styles.filterRow} lightColor="transparent" darkColor="transparent">
-      {RANGES.map((r) => {
-        const active = r.value === value;
-        return (
-          <Pressable key={r.value} onPress={() => onChange(r.value)} style={[styles.filterChip, active && styles.filterChipActive]}>
-            <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{r.label}</Text>
-          </Pressable>
-        );
-      })}
-      <Pressable onPress={() => onChange('custom')} style={[styles.filterChip, value === 'custom' && styles.filterChipActive]}>
-        <Text style={[styles.filterChipText, value === 'custom' && styles.filterChipTextActive]}>Custom…</Text>
-      </Pressable>
+      {RANGES.map((r) => (
+        <Chip key={r.value} label={r.label} active={r.value === value} onPress={() => onChange(r.value)} />
+      ))}
+      <Chip label="Custom…" active={value === 'custom'} onPress={() => onChange('custom')} />
     </View>
   );
 }
 
 function TrendChart({ trend }: { trend: SalesSummary['trend'] }) {
   const colorScheme = useColorScheme();
+  const tint = Colors[colorScheme].tint;
   const maxAmount = Math.max(...trend.map((p) => p.totalAmount), 1);
 
   return (
-    <View style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
-      <Text style={styles.sectionTitle}>Daily revenue</Text>
+    <Section title="Daily revenue">
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View style={styles.chartRow} lightColor="transparent" darkColor="transparent">
           {trend.map((point) => {
@@ -168,7 +163,7 @@ function TrendChart({ trend }: { trend: SalesSummary['trend'] }) {
             return (
               <View key={point.date} style={styles.chartBarCol} lightColor="transparent" darkColor="transparent">
                 <View style={styles.chartBarTrack}>
-                  <View style={[styles.chartBar, { height }]} />
+                  <View style={[styles.chartBar, { height, backgroundColor: tint }]} />
                 </View>
                 <Text style={[styles.chartLabel, colorScheme === 'dark' ? styles.metaDark : styles.metaLight]}>
                   {formatShortDate(point.date)}
@@ -178,7 +173,7 @@ function TrendChart({ trend }: { trend: SalesSummary['trend'] }) {
           })}
         </View>
       </ScrollView>
-    </View>
+    </Section>
   );
 }
 
@@ -234,9 +229,7 @@ function PnlSection() {
         <View style={styles.customRangeRow} lightColor="transparent" darkColor="transparent">
           <DateField label="From" value={fromDate} onChange={setFromDate} />
           <DateField label="To" value={toDate} onChange={setToDate} />
-          <Pressable style={styles.applyButton} onPress={() => applyCustomRange(false)}>
-            <Text style={styles.applyButtonText}>Apply</Text>
-          </Pressable>
+          <Button label="Apply" onPress={() => applyCustomRange(false)} style={styles.applyButtonCompact} />
         </View>
       )}
       {dateError && <Text style={styles.error}>{dateError}</Text>}
@@ -251,8 +244,7 @@ function PnlSection() {
         <>
           {pnl.currencies.length === 0 && <Text style={styles.empty}>No revenue, cost, or expenses in this range yet.</Text>}
           {pnl.currencies.map((c) => (
-            <View key={c.currency} style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
-              <Text style={styles.sectionTitle}>{c.currency}</Text>
+            <Section key={c.currency} title={c.currency}>
               <View style={styles.pnlRow} lightColor="transparent" darkColor="transparent">
                 <Text style={styles.pnlLabel}>Revenue (excl. VAT)</Text>
                 <Text style={styles.pnlValue}>{formatMoney(c.revenue, c.currency)}</Text>
@@ -273,7 +265,7 @@ function PnlSection() {
                 <Text style={styles.pnlTotalLabel}>Net profit</Text>
                 <Text style={styles.pnlTotalValue}>{formatMoney(c.netProfit, c.currency)}</Text>
               </View>
-            </View>
+            </Section>
           ))}
           <Text style={styles.pnlFootnote}>* Cost of goods uses each item's most recent purchase cost, not exact FIFO.</Text>
         </>
@@ -315,8 +307,7 @@ function CashUpSection() {
         <>
           {cashUp.currencies.length === 0 && <Text style={styles.empty}>No sales or expenses on this day yet.</Text>}
           {cashUp.currencies.map((c) => (
-            <View key={c.currency} style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
-              <Text style={styles.sectionTitle}>{c.currency}</Text>
+            <Section key={c.currency} title={c.currency}>
               <Text style={styles.cashUpSubheading}>Sales collected</Text>
               {c.salesByProvider.map((t) => (
                 <View key={`sale-${t.provider}`} style={styles.pnlRow} lightColor="transparent" darkColor="transparent">
@@ -343,7 +334,7 @@ function CashUpSection() {
                 <Text style={styles.pnlTotalLabel}>Net cash movement</Text>
                 <Text style={styles.pnlTotalValue}>{formatMoney(c.netCashMovement, c.currency)}</Text>
               </View>
-            </View>
+            </Section>
           ))}
         </>
       )}
@@ -372,8 +363,7 @@ function CashFlowChart({ buckets }: { buckets: CashFlowResult['currencies'][numb
   const maxAbs = Math.max(...buckets.map((b) => Math.abs(b.netChange)), 1);
 
   return (
-    <View style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
-      <Text style={styles.sectionTitle}>Net cash change</Text>
+    <Section title="Net cash change">
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View style={styles.chartRow} lightColor="transparent" darkColor="transparent">
           {buckets.map((bucket) => {
@@ -381,7 +371,12 @@ function CashFlowChart({ buckets }: { buckets: CashFlowResult['currencies'][numb
             return (
               <View key={bucket.periodStart} style={styles.chartBarCol} lightColor="transparent" darkColor="transparent">
                 <View style={styles.chartBarTrack}>
-                  <View style={[styles.chartBar, bucket.netChange < 0 ? styles.chartBarNegative : styles.chartBarPositive, { height }]} />
+                  <View
+                    style={[
+                      styles.chartBar,
+                      { height, backgroundColor: bucket.netChange < 0 ? semanticColors.danger : semanticColors.success },
+                    ]}
+                  />
                 </View>
                 <Text style={[styles.chartLabel, colorScheme === 'dark' ? styles.metaDark : styles.metaLight]}>
                   {formatShortDate(bucket.periodStart)}
@@ -391,7 +386,7 @@ function CashFlowChart({ buckets }: { buckets: CashFlowResult['currencies'][numb
           })}
         </View>
       </ScrollView>
-    </View>
+    </Section>
   );
 }
 
@@ -445,9 +440,7 @@ function CashFlowSection() {
         <View style={styles.customRangeRow} lightColor="transparent" darkColor="transparent">
           <DateField label="From" value={fromDate} onChange={setFromDate} />
           <DateField label="To" value={toDate} onChange={setToDate} />
-          <Pressable style={styles.applyButton} onPress={() => applyCustomRange(false)}>
-            <Text style={styles.applyButtonText}>Apply</Text>
-          </Pressable>
+          <Button label="Apply" onPress={() => applyCustomRange(false)} style={styles.applyButtonCompact} />
         </View>
       )}
       {dateError && <Text style={styles.error}>{dateError}</Text>}
@@ -464,8 +457,7 @@ function CashFlowSection() {
           {cashFlow.currencies.map((c) => (
             <View key={c.currency}>
               {c.buckets.length > 1 && <CashFlowChart buckets={c.buckets} />}
-              <View style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
-                <Text style={styles.sectionTitle}>{c.currency}</Text>
+              <Section title={c.currency}>
                 <Text style={styles.cashUpSubheading}>Cash in</Text>
                 {c.inflowBreakdown.map((item) => (
                   <View key={`in-${item.sourceType}`} style={styles.pnlRow} lightColor="transparent" darkColor="transparent">
@@ -488,7 +480,7 @@ function CashFlowSection() {
                   <Text style={styles.pnlTotalLabel}>Net cash flow</Text>
                   <Text style={styles.pnlTotalValue}>{formatMoney(c.netCashFlow, c.currency)}</Text>
                 </View>
-              </View>
+              </Section>
             </View>
           ))}
         </>
@@ -546,7 +538,7 @@ function TrialBalanceView() {
       {!error && trialBalance === null && <ActivityIndicator style={styles.loading} />}
 
       {!error && trialBalance !== null && (
-        <View style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+        <Card>
           {trialBalance.rows.length === 0 && <Text style={styles.empty}>No ledger activity yet.</Text>}
           {trialBalance.rows.map((row) => (
             <View key={row.accountCode} style={styles.ledgerRow} lightColor="transparent" darkColor="transparent">
@@ -569,7 +561,7 @@ function TrialBalanceView() {
               </Text>
             </View>
           )}
-        </View>
+        </Card>
       )}
     </ScrollView>
   );
@@ -596,17 +588,10 @@ function GeneralLedgerView() {
     >
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View style={styles.filterRow} lightColor="transparent" darkColor="transparent">
-          <Pressable onPress={() => setAccountCode(null)} style={[styles.filterChip, accountCode === null && styles.filterChipActive]}>
-            <Text style={[styles.filterChipText, accountCode === null && styles.filterChipTextActive]}>All accounts</Text>
-          </Pressable>
-          {ACCOUNT_FILTERS.map((a) => {
-            const active = a.code === accountCode;
-            return (
-              <Pressable key={a.code} onPress={() => setAccountCode(a.code)} style={[styles.filterChip, active && styles.filterChipActive]}>
-                <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{a.label}</Text>
-              </Pressable>
-            );
-          })}
+          <Chip label="All accounts" active={accountCode === null} onPress={() => setAccountCode(null)} />
+          {ACCOUNT_FILTERS.map((a) => (
+            <Chip key={a.code} label={a.label} active={a.code === accountCode} onPress={() => setAccountCode(a.code)} />
+          ))}
         </View>
       </ScrollView>
 
@@ -647,18 +632,8 @@ function LedgerSection() {
     <View style={styles.container}>
       <View style={styles.screenHeaderPadding} lightColor="transparent" darkColor="transparent">
         <View style={styles.filterRow} lightColor="transparent" darkColor="transparent">
-          <Pressable
-            onPress={() => setSubview('trial-balance')}
-            style={[styles.filterChip, subview === 'trial-balance' && styles.filterChipActive]}
-          >
-            <Text style={[styles.filterChipText, subview === 'trial-balance' && styles.filterChipTextActive]}>Trial Balance</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setSubview('general-ledger')}
-            style={[styles.filterChip, subview === 'general-ledger' && styles.filterChipActive]}
-          >
-            <Text style={[styles.filterChipText, subview === 'general-ledger' && styles.filterChipTextActive]}>General Ledger</Text>
-          </Pressable>
+          <Chip label="Trial Balance" active={subview === 'trial-balance'} onPress={() => setSubview('trial-balance')} />
+          <Chip label="General Ledger" active={subview === 'general-ledger'} onPress={() => setSubview('general-ledger')} />
         </View>
       </View>
       {subview === 'trial-balance' ? <TrialBalanceView /> : <GeneralLedgerView />}
@@ -741,51 +716,44 @@ function ExpensesSection() {
               </Text>
             </View>
             <Text style={styles.rowPrimary}>{formatMoney(expense.amount, expense.currency)}</Text>
-            <Pressable
-              style={[styles.expenseDeleteButton, (deletingId === expense.id || !isOnline) && styles.buttonDisabled]}
+            <Button
+              label="Delete"
+              variant="destructive"
               disabled={deletingId === expense.id || !isOnline}
               onPress={() => remove(expense.id)}
-            >
-              <Text style={styles.expenseDeleteText}>Delete</Text>
-            </Pressable>
+              style={styles.expenseDeleteButton}
+            />
           </View>
         ))}
 
-      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
-      <Text style={styles.sectionTitle}>Add expense</Text>
-      <View style={styles.filterRow}>
-        {EXPENSE_CATEGORIES.map((c) => {
-          const active = c === category;
-          return (
-            <Pressable key={c} onPress={() => setCategory(c)} style={[styles.filterChip, active && styles.filterChipActive]}>
-              <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{c}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-      <TextInput style={[inputStyle, styles.expenseInput]} placeholder="Description" value={description} onChangeText={setDescription} />
-      <TextInput
-        style={[inputStyle, styles.expenseInput]}
-        placeholder="Amount"
-        value={amount}
-        onChangeText={setAmount}
-        keyboardType="decimal-pad"
-      />
-      <View style={styles.filterRow}>
-        {EXPENSE_PAYMENT_METHODS.map((method) => {
-          const active = method === paymentMethod;
-          return (
-            <Pressable key={method} onPress={() => setPaymentMethod(method)} style={[styles.filterChip, active && styles.filterChipActive]}>
-              <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{method}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-      {formError && <Text style={styles.error}>{formError}</Text>}
-      {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
-      <Pressable style={[styles.applyButton, styles.expenseSubmitButton, (saving || !isOnline) && styles.buttonDisabled]} disabled={saving || !isOnline} onPress={submit}>
-        <Text style={styles.applyButtonText}>{saving ? 'Saving…' : '+ Add expense'}</Text>
-      </Pressable>
+      <Section title="Add expense">
+        <View style={styles.filterRow}>
+          {EXPENSE_CATEGORIES.map((c) => (
+            <Chip key={c} label={c} active={c === category} onPress={() => setCategory(c)} />
+          ))}
+        </View>
+        <TextInput style={[inputStyle, styles.expenseInput]} placeholder="Description" value={description} onChangeText={setDescription} />
+        <TextInput
+          style={[inputStyle, styles.expenseInput]}
+          placeholder="Amount"
+          value={amount}
+          onChangeText={setAmount}
+          keyboardType="decimal-pad"
+        />
+        <View style={[styles.filterRow, styles.expenseInput]}>
+          {EXPENSE_PAYMENT_METHODS.map((method) => (
+            <Chip key={method} label={method} active={method === paymentMethod} onPress={() => setPaymentMethod(method)} />
+          ))}
+        </View>
+        {formError && <Text style={styles.error}>{formError}</Text>}
+        {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
+        <Button
+          label={saving ? 'Saving…' : '+ Add expense'}
+          disabled={saving || !isOnline}
+          onPress={submit}
+          style={styles.expenseSubmitButton}
+        />
+      </Section>
     </ScrollView>
   );
 }
@@ -851,9 +819,7 @@ function SalesSection() {
         <View style={styles.customRangeRow} lightColor="transparent" darkColor="transparent">
           <DateField label="From" value={fromDate} onChange={setFromDate} />
           <DateField label="To" value={toDate} onChange={setToDate} />
-          <Pressable style={styles.applyButton} onPress={() => applyCustomRange(false)}>
-            <Text style={styles.applyButtonText}>Apply</Text>
-          </Pressable>
+          <Button label="Apply" onPress={() => applyCustomRange(false)} style={styles.applyButtonCompact} />
         </View>
       )}
       {dateError && <Text style={styles.error}>{dateError}</Text>}
@@ -867,21 +833,21 @@ function SalesSection() {
       {!error && summary !== null && (
         <>
           <View style={styles.tiles}>
-            <View style={styles.tile} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+            <Card style={styles.tile}>
               <Text style={styles.tileValue}>{summary.totalOrders}</Text>
               <Text style={styles.tileLabel}>Paid orders</Text>
-            </View>
+            </Card>
             {summary.totals.length === 0 ? (
-              <View style={styles.tile} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+              <Card style={styles.tile}>
                 <Text style={styles.tileValue}>—</Text>
                 <Text style={styles.tileLabel}>Revenue</Text>
-              </View>
+              </Card>
             ) : (
               summary.totals.map((t) => (
-                <View key={t.currency} style={styles.tile} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+                <Card key={t.currency} style={styles.tile}>
                   <Text style={styles.tileValue}>{formatMoney(t.totalAmount, t.currency)}</Text>
                   <Text style={styles.tileLabel}>Revenue ({t.orderCount})</Text>
-                </View>
+                </Card>
               ))
             )}
           </View>
@@ -893,8 +859,7 @@ function SalesSection() {
           {summary.trend.length > 0 && <TrendChart trend={summary.trend} />}
 
           {summary.topItems.length > 0 && (
-            <View style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
-              <Text style={styles.sectionTitle}>Top items</Text>
+            <Section title="Top items">
               {summary.topItems.map((item, index) => (
                 <View key={item.catalogItemId} style={styles.topItemRow} lightColor="transparent" darkColor="transparent">
                   <View style={styles.topItemNameCol} lightColor="transparent" darkColor="transparent">
@@ -908,7 +873,7 @@ function SalesSection() {
                   <Text style={styles.rowPrimary}>{item.revenue.toFixed(2)}</Text>
                 </View>
               ))}
-            </View>
+            </Section>
           )}
         </>
       )}
@@ -926,9 +891,7 @@ export default function SalesScreen() {
       <View style={[styles.headerRow, styles.screenHeaderPadding]} lightColor="transparent" darkColor="transparent">
         <Text style={styles.title}>Sales</Text>
         {canManageOrders && (
-          <Pressable style={styles.saleButton} onPress={() => router.push('/pos')}>
-            <Text style={styles.saleButtonText}>+ New sale</Text>
-          </Pressable>
+          <Button label="+ New sale" variant="success" onPress={() => router.push('/pos')} style={styles.saleButtonCompact} />
         )}
       </View>
       <View style={styles.screenHeaderPadding} lightColor="transparent" darkColor="transparent">
@@ -947,40 +910,30 @@ export default function SalesScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingTop: 24, paddingHorizontal: 16, paddingBottom: 32 },
-  title: { fontSize: 20, fontWeight: 'bold' },
+  title: typography.title,
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  saleButton: { backgroundColor: '#2e7d32', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
-  saleButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  saleButtonCompact: { paddingHorizontal: spacing.md + 2, paddingVertical: spacing.sm },
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  filterChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#ccc' },
-  filterChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
-  filterChipText: { fontSize: 13, fontWeight: '500', opacity: 0.7 },
-  filterChipTextActive: { color: '#fff', opacity: 1 },
   customRangeRow: { flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'center' },
   dateFieldFlex: { flex: 1 },
   dateInput: { borderWidth: 1, borderColor: '#ccc', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13 },
   dateInputLight: { color: '#000' },
   dateInputDark: { color: '#fff' },
   datePlaceholder: { opacity: 0.5 },
-  applyButton: { backgroundColor: '#007aff', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 6 },
-  applyButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  applyButtonCompact: { paddingHorizontal: spacing.md + 2, paddingVertical: spacing.sm + 1 },
   separator: { marginTop: 12, marginBottom: 12, height: 1, width: '100%' },
   loading: { marginTop: 24 },
-  error: { color: '#c0392b', marginBottom: 12 },
+  error: { color: semanticColors.danger, marginBottom: 12 },
   cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
   empty: { opacity: 0.6, marginBottom: 16 },
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 16 },
-  tile: { flexGrow: 1, minWidth: 130, alignItems: 'center', paddingVertical: 20, borderWidth: 1, borderColor: '#ccc', borderRadius: 10 },
+  tile: { flexGrow: 1, minWidth: 130, alignItems: 'center' },
   tileValue: { fontSize: 22, fontWeight: 'bold' },
   tileLabel: { marginTop: 4, fontSize: 12, opacity: 0.7 },
-  section: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 14, marginBottom: 16 },
-  sectionTitle: { fontSize: 12, fontWeight: '700', opacity: 0.5, textTransform: 'uppercase', marginBottom: 12 },
   chartRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingBottom: 4 },
   chartBarCol: { alignItems: 'center', width: 32 },
   chartBarTrack: { height: CHART_HEIGHT, justifyContent: 'flex-end' },
-  chartBar: { width: 16, backgroundColor: '#007aff', borderRadius: 4 },
-  chartBarPositive: { backgroundColor: '#2e7d32' },
-  chartBarNegative: { backgroundColor: '#c0392b' },
+  chartBar: { width: 16, borderRadius: 4 },
   chartLabel: { fontSize: 10, marginTop: 6 },
   topItemRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   topItemNameCol: { flexShrink: 1, paddingRight: 12 },
@@ -991,10 +944,6 @@ const styles = StyleSheet.create({
   screenContainer: { flex: 1 },
   screenHeaderPadding: { paddingHorizontal: 16 },
   sectionRow: { flexDirection: 'row', gap: 8, marginBottom: 12, paddingTop: 12 },
-  sectionChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#ccc' },
-  sectionChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
-  sectionChipText: { fontSize: 13, fontWeight: '600', opacity: 0.7 },
-  sectionChipTextActive: { color: '#fff', opacity: 1 },
   pnlRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   pnlLabel: { fontSize: 13, opacity: 0.75 },
   pnlValue: { fontSize: 13, opacity: 0.75 },
@@ -1027,12 +976,10 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
   },
   ledgerInfo: { flexShrink: 1 },
-  ledgerDebit: { fontSize: 14, fontWeight: '600', color: '#2e7d32' },
-  ledgerCredit: { fontSize: 14, fontWeight: '600', color: '#c0392b' },
-  expenseDeleteButton: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#c0392b' },
-  expenseDeleteText: { color: '#c0392b', fontSize: 12, fontWeight: '600' },
+  ledgerDebit: { fontSize: 14, fontWeight: '600', color: semanticColors.success },
+  ledgerCredit: { fontSize: 14, fontWeight: '600', color: semanticColors.danger },
+  expenseDeleteButton: { paddingHorizontal: spacing.md - 2, paddingVertical: spacing.sm - 2 },
   expenseInput: { marginTop: 10 },
-  expenseSubmitButton: { marginTop: 14, alignItems: 'center' },
+  expenseSubmitButton: { marginTop: 14 },
   expenseTextInput: { borderWidth: 1, borderColor: '#ccc', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13 },
-  buttonDisabled: { opacity: 0.6 },
 });

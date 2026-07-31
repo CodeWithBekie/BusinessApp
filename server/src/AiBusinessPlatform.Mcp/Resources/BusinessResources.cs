@@ -24,7 +24,7 @@ public class BusinessResources(
     [McpServerResource(UriTemplate = "business://catalog", Name = "catalog", MimeType = "application/json")]
     public async Task<string> GetCatalog(CancellationToken cancellationToken)
     {
-        var items = await catalogTools.ListCatalogItemsAsync(tenantProvider.CurrentBusinessId, true, cancellationToken);
+        var items = await catalogTools.ListCatalogItemsAsync(tenantProvider.CurrentBusinessId, true, null, cancellationToken);
         return JsonSerializer.Serialize(items);
     }
 

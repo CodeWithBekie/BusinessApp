@@ -13,6 +13,7 @@ Every REST route in the system, one file per concern. All non-webhook, non-auth 
 | `MarketplaceEndpoints.cs` | `/api/marketplace` | **no blanket policy** — browsing is anonymous; the checkout/order/payment routes are individually `"CustomerOnly"` |
 | `WebhooksEndpoints.cs` | `/webhooks` | real webhooks verify a signature/hash manually instead of JWT; dev simulate routes require `"BusinessOnly"` (or nothing, where tenant is resolved from the payload) |
 | `AssistantEndpoints.cs` | `/api/assistant` | `"BusinessOnly"` |
+| `CustomerAssistantEndpoints.cs` | `/api/customer-assistant` | `"CustomerOnly"` |
 
 **Auth policies** are defined once in `Infrastructure/Auth/JwtAuthenticationExtensions.cs`
 (shared by this project and `Mcp`, so tokens are interchangeable between the two hosts):

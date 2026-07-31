@@ -1,9 +1,14 @@
+import { SymbolView } from 'expo-symbols';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { apiClient, MarketplaceOrderResult } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
+import { Button } from '@/components/ui/Button';
+import Colors from '@/constants/Colors';
+import { semanticColors } from '@/constants/theme';
+import { useColorScheme } from '@/components/useColorScheme';
 import { formatMoney } from '@/src/common/format';
 import { useIsOnline } from '@/src/offline/networkStatus';
 
@@ -19,6 +24,8 @@ export default function CheckoutScreen() {
   const { businessId, items } = useLocalSearchParams<{ businessId: string; items: string }>();
   const router = useRouter();
   const isOnline = useIsOnline();
+  const colorScheme = useColorScheme();
+  const tint = Colors[colorScheme].tint;
 
   const lines = useMemo<CheckoutLine[]>(() => {
     try {
@@ -67,14 +74,13 @@ export default function CheckoutScreen() {
       <View style={styles.container}>
         <Stack.Screen options={{ title: 'Order placed' }} />
         <View style={styles.successBanner} lightColor="#e8f5e9" darkColor="rgba(46,125,50,0.2)">
+          <SymbolView name={{ ios: 'checkmark.circle.fill', android: 'code', web: 'code' }} tintColor={semanticColors.success} size={40} style={styles.successIcon} />
           <Text style={styles.successTitle}>Order placed — {formatMoney(result.totalAmount, result.currency)}</Text>
           <Text style={styles.successMeta}>From: {result.businessName}</Text>
           <Text style={styles.successMeta}>Reference: {result.paymentReference}</Text>
           {result.paymentInstructions && <Text style={styles.successMeta}>{result.paymentInstructions}</Text>}
         </View>
-        <Pressable style={styles.doneButton} onPress={() => router.replace('/(customer)/orders')}>
-          <Text style={styles.doneButtonText}>View my orders</Text>
-        </Pressable>
+        <Button label="View my orders" variant="success" onPress={() => router.replace('/(customer)/orders')} style={styles.doneButton} />
       </View>
     );
   }
@@ -105,19 +111,18 @@ export default function CheckoutScreen() {
       )}
       <View style={styles.totalRow} lightColor="transparent" darkColor="transparent">
         <Text style={styles.totalLabel}>Total</Text>
-        <Text style={styles.totalValue}>{formatMoney(grandTotal, currency)}</Text>
+        <Text style={[styles.totalValue, { color: tint }]}>{formatMoney(grandTotal, currency)}</Text>
       </View>
 
       {error && <Text style={styles.error}>{error}</Text>}
       {!isOnline && <Text style={styles.error}>You're offline — connect to place this order.</Text>}
 
-      <Pressable
-        style={[styles.placeButton, (placing || !isOnline || lines.length === 0) && styles.buttonDisabled]}
+      <Button
+        label={placing ? 'Placing order…' : 'Place order'}
         disabled={placing || !isOnline || lines.length === 0}
         onPress={placeOrder}
-      >
-        <Text style={styles.placeButtonText}>{placing ? 'Placing order…' : 'Place order'}</Text>
-      </Pressable>
+        style={styles.placeButton}
+      />
     </View>
   );
 }
@@ -131,13 +136,11 @@ const styles = StyleSheet.create({
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#ccc' },
   totalLabel: { fontSize: 15, fontWeight: '700' },
   totalValue: { fontSize: 17, fontWeight: '800' },
-  error: { color: '#c0392b', marginTop: 12 },
-  placeButton: { backgroundColor: '#007aff', paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 20 },
-  buttonDisabled: { opacity: 0.6 },
-  placeButtonText: { color: '#fff', fontWeight: '600', fontSize: 15 },
-  successBanner: { borderRadius: 10, padding: 16, marginTop: 16 },
-  successTitle: { fontSize: 16, fontWeight: '700' },
-  successMeta: { fontSize: 13, opacity: 0.8, marginTop: 6 },
-  doneButton: { backgroundColor: '#2e7d32', paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginTop: 16 },
-  doneButtonText: { color: '#fff', fontWeight: '600' },
+  error: { color: semanticColors.danger, marginTop: 12 },
+  placeButton: { marginTop: 20 },
+  successBanner: { borderRadius: 14, padding: 20, marginTop: 16, alignItems: 'center' },
+  successIcon: { marginBottom: 10 },
+  successTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  successMeta: { fontSize: 13, opacity: 0.8, marginTop: 6, textAlign: 'center' },
+  doneButton: { marginTop: 16 },
 });

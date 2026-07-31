@@ -31,6 +31,22 @@ export function getAuthToken(): string | null {
   return authToken;
 }
 
+// Server errors come back either as a plain JSON string (Results.BadRequest(ex.Message)) or as
+// {"message": "..."} (Results.Json(new { message }, statusCode: ...)) — pull out a clean,
+// human-readable string from either shape so screens can show it directly instead of raw JSON.
+// Falls back to the raw body text for anything else (HTML error pages, empty bodies, etc.).
+function extractErrorDetail(bodyText: string): string {
+  if (!bodyText) return '';
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (typeof parsed === 'string') return parsed;
+    if (parsed && typeof parsed.message === 'string') return parsed.message;
+  } catch {
+    // Not JSON — fall through to the raw text.
+  }
+  return bodyText;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
@@ -46,8 +62,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`API request to ${path} failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`);
+    const bodyText = await response.text().catch(() => '');
+    const detail = extractErrorDetail(bodyText);
+    // Prefer the server's own clean message (e.g. "Invalid email or password.") when there is
+    // one — only fall back to the technical "status/statusText" form when the server gave us
+    // nothing usable to show a person.
+    throw new Error(detail || `API request to ${path} failed: ${response.status} ${response.statusText}`);
   }
 
   if (response.status === 204) {
@@ -66,6 +86,14 @@ export interface AssistantResourceSummary {
   uri: string;
   name: string | null;
   title: string | null;
+}
+
+// A resolved MCP prompt backing a suggestion chip — title is the chip's display label, message is
+// the actual text sent when tapped (they can differ; see AssistantEndpoints.cs's remarks).
+export interface AssistantPrompt {
+  name: string;
+  title: string;
+  message: string;
 }
 
 export interface ElicitationSchemaProperty {
@@ -117,8 +145,9 @@ export async function streamAssistantChat(
   }
 
   if (!response.ok || !response.body) {
-    const body = await response.text().catch(() => '');
-    handlers.onError(`Assistant request failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`);
+    const bodyText = await response.text().catch(() => '');
+    const detail = extractErrorDetail(bodyText);
+    handlers.onError(detail || `Assistant request failed: ${response.status} ${response.statusText}`);
     return;
   }
 
@@ -151,8 +180,77 @@ export async function streamAssistantChat(
   }
 }
 
+interface CustomerAssistantStreamHandlers {
+  onToken: (text: string) => void;
+  onDone: (toolsUsed: string[]) => void;
+  onError: (message: string) => void;
+}
+
+// Customer counterpart to streamAssistantChat, pointed at the marketplace chat endpoint — no
+// attachedResourceUris (that's a business-only concept) and no elicitation_request frame (the
+// marketplace tool surface has no mid-call structured forms, see CustomerAssistantEndpoints.cs).
+export async function streamCustomerAssistantChat(
+  messages: AssistantMessage[],
+  handlers: CustomerAssistantStreamHandlers,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/customer-assistant/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: JSON.stringify({ messages }),
+    });
+  } catch (err) {
+    handlers.onError((err as Error).message);
+    return;
+  }
+
+  if (response.status === 401) {
+    onUnauthorized?.();
+  }
+
+  if (!response.ok || !response.body) {
+    const bodyText = await response.text().catch(() => '');
+    const detail = extractErrorDetail(bodyText);
+    handlers.onError(detail || `Assistant request failed: ${response.status} ${response.statusText}`);
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let separatorIndex: number;
+    while ((separatorIndex = buffer.indexOf('\n\n')) !== -1) {
+      const rawEvent = buffer.slice(0, separatorIndex);
+      buffer = buffer.slice(separatorIndex + 2);
+      const dataLine = rawEvent.split('\n').find((line) => line.startsWith('data: '));
+      if (!dataLine) continue;
+
+      try {
+        const payload = JSON.parse(dataLine.slice('data: '.length));
+        if (payload.type === 'token') handlers.onToken(payload.text);
+        else if (payload.type === 'done') handlers.onDone(payload.toolsUsed ?? []);
+        else if (payload.type === 'error') handlers.onError(payload.message);
+      } catch {
+        // Ignore a malformed event rather than aborting the whole stream over it.
+      }
+    }
+  }
+}
+
 export const apiClient = {
   getAssistantResources: () => request<AssistantResourceSummary[]>('/api/assistant/resources'),
+  getAssistantPrompts: () => request<AssistantPrompt[]>('/api/assistant/prompts'),
+  getCustomerAssistantPrompts: () => request<AssistantPrompt[]>('/api/customer-assistant/prompts'),
 
   submitElicitation: (elicitationId: string, action: 'accept' | 'decline' | 'cancel', content?: Record<string, unknown>) =>
     request<void>(`/api/assistant/elicit/${elicitationId}`, { method: 'POST', body: JSON.stringify({ action, content }) }),
@@ -173,7 +271,7 @@ export const apiClient = {
   updateBusiness: (input: UpdateBusinessDetailsInput) =>
     request<BusinessDetails>('/api/business', { method: 'PATCH', body: JSON.stringify(input) }),
 
-  getCatalog: () => request<CatalogItem[]>('/api/catalog'),
+  getCatalog: (lowStockOnly?: boolean) => request<CatalogItem[]>(`/api/catalog${lowStockOnly ? '?lowStockOnly=true' : ''}`),
   createCatalogItem: (input: CreateCatalogItemInput) =>
     request<CatalogItem>('/api/catalog', { method: 'POST', body: JSON.stringify(input) }),
   updateCatalogItem: (id: string, input: UpdateCatalogItemInput) =>
@@ -197,8 +295,9 @@ export const apiClient = {
       body: formData,
     });
     if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`Failed to upload image: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`);
+      const bodyText = await response.text().catch(() => '');
+      const detail = extractErrorDetail(bodyText);
+      throw new Error(detail || `Failed to upload image: ${response.status} ${response.statusText}`);
     }
     return response.json();
   },
@@ -210,6 +309,12 @@ export const apiClient = {
     request<OrderDetail>(`/api/orders/${id}/payment`, { method: 'POST', body: JSON.stringify({ provider, reference, amount }) }),
   updateOrderPaymentProvider: (id: string, provider: OrderPayment['provider']) =>
     request<OrderDetail>(`/api/orders/${id}/payment`, { method: 'PATCH', body: JSON.stringify({ provider }) }),
+  payOrderWithEcoCash: (id: string, phoneNumber: string) =>
+    request<OrderDetail>(`/api/orders/${id}/pay/ecocash`, { method: 'POST', body: JSON.stringify({ phoneNumber }) }),
+  assignDeliveryDriver: (id: string, driverName?: string) =>
+    request<DeliveryAssignmentResult>(`/api/orders/${id}/delivery/driver`, { method: 'POST', body: JSON.stringify({ driverName: driverName ?? null }) }),
+  updateDeliveryStatus: (id: string, status: DeliveryInfo['status']) =>
+    request<DeliveryStatusResult>(`/api/orders/${id}/delivery/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   getApprovals: () => request<PendingApproval[]>('/api/approvals'),
   getSalesSummary: (range?: SalesRange, from?: string, to?: string) => {
     const params = new URLSearchParams();
@@ -338,6 +443,23 @@ export const apiClient = {
       body: JSON.stringify({ integrationId, integrationKey, notificationEmail }),
     }),
 
+  connectEcoCash: (input: {
+    username: string;
+    password: string;
+    merchantCode: string;
+    merchantPin: string;
+    merchantNumber: string;
+    merchantName: string;
+    superMerchantName: string;
+    countryCode?: string;
+    terminalId?: string;
+    location?: string;
+  }) =>
+    request<EcoCashConnection>('/api/payments/connect-ecocash', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
   setBusinessVisibility: (isPubliclyListed: boolean) =>
     request<{ isPubliclyListed: boolean }>('/api/business/visibility', { method: 'PATCH', body: JSON.stringify({ isPubliclyListed }) }),
 
@@ -378,8 +500,9 @@ export const apiClient = {
       body: formData,
     });
     if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`API request to /api/marketplace/orders/${orderId}/payment-proof failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`);
+      const bodyText = await response.text().catch(() => '');
+      const detail = extractErrorDetail(bodyText);
+      throw new Error(detail || `API request to /api/marketplace/orders/${orderId}/payment-proof failed: ${response.status} ${response.statusText}`);
     }
   },
 
@@ -451,11 +574,30 @@ export interface MarketplaceOrderDetail {
   currency: string;
   items: OrderLineItem[];
   payment: OrderPayment | null;
+  delivery: DeliveryInfo | null;
   canCancelDirectly: boolean;
   canRequestCancellation: boolean;
   isPaynowConnected: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+// Null when no Delivery row exists yet for this order (the common case — most orders never get one).
+export interface DeliveryInfo {
+  status: 'Pending' | 'Assigned' | 'InTransit' | 'Delivered';
+  driverName: string | null;
+}
+
+export interface DeliveryAssignmentResult {
+  deliveryId: string;
+  driverName: string | null;
+  status: DeliveryInfo['status'];
+}
+
+export interface DeliveryStatusResult {
+  orderId: string;
+  status: DeliveryInfo['status'];
+  driverName: string | null;
 }
 
 export interface EcoCashPaymentResult {
@@ -534,6 +676,8 @@ export interface CatalogItem {
   createdAt: string;
   updatedAt: string;
   hasImage: boolean;
+  lowStockThreshold: number;
+  isLowStock: boolean;
 }
 
 export interface CreateCatalogItemInput {
@@ -544,6 +688,7 @@ export interface CreateCatalogItemInput {
   stockQuantity?: number | null;
   unit?: string;
   code?: string | null;
+  lowStockThreshold?: number;
 }
 
 export interface UpdateCatalogItemInput {
@@ -554,6 +699,7 @@ export interface UpdateCatalogItemInput {
   unit?: string;
   active?: boolean;
   code?: string | null;
+  lowStockThreshold?: number;
 }
 
 export type OrderStatus = 'Quoted' | 'Invoiced' | 'Paid' | 'Fulfilled' | 'Cancelled';
@@ -613,6 +759,7 @@ export interface OrderDetail {
   currency: string;
   items: OrderLineItem[];
   payment: OrderPayment | null;
+  delivery: DeliveryInfo | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -738,6 +885,20 @@ export interface PaynowConnection {
   businessId: string;
   integrationId: string;
   notificationEmail: string;
+  createdAt: string;
+}
+
+export interface EcoCashConnection {
+  id: string;
+  businessId: string;
+  username: string;
+  merchantCode: string;
+  merchantNumber: string;
+  merchantName: string;
+  superMerchantName: string;
+  countryCode: string;
+  terminalId: string;
+  location: string;
   createdAt: string;
 }
 

@@ -7,7 +7,8 @@ public record CatalogAvailabilityMatch(Guid CatalogItemId, string Name, decimal 
 
 public record CatalogItemSummary(
     Guid Id, string Name, string? Code, CatalogItemType ItemType, decimal Price, string Currency,
-    int? StockQuantity, string Unit, bool Active, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, bool HasImage);
+    int? StockQuantity, string Unit, bool Active, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, bool HasImage,
+    int LowStockThreshold, bool IsLowStock);
 
 public record CatalogItemImage(byte[] Data, string ContentType);
 
@@ -43,16 +44,16 @@ public interface ICatalogTools
 
     // FR15 (Section 6.3) — owner-facing catalog management, shared by the dashboard REST endpoints
     // and the MCP/Assistant tools (Section 10.2/10.7's "one function, multiple entry points").
-    [Description("Lists this business's catalog items, optionally filtered to only active (non-deactivated) items.")]
-    Task<IReadOnlyList<CatalogItemSummary>> ListCatalogItemsAsync(Guid businessId, bool? activeOnly, CancellationToken cancellationToken = default);
+    [Description("Lists this business's catalog items, optionally filtered to only active (non-deactivated) items and/or only items at or below their low-stock threshold.")]
+    Task<IReadOnlyList<CatalogItemSummary>> ListCatalogItemsAsync(Guid businessId, bool? activeOnly, bool? lowStockOnly, CancellationToken cancellationToken = default);
 
-    [Description("Creates a new catalog item. itemType must be \"Stock\", \"TimeBased\", or \"Quote\". currency defaults to USD, unit defaults to \"each\", stockQuantity only applies to Stock items. code is an optional SKU/item code shown on invoices.")]
-    Task<CatalogItemSummary> CreateCatalogItemAsync(Guid businessId, string name, CatalogItemType itemType, decimal price, string? currency, int? stockQuantity, string? unit, string? code, CancellationToken cancellationToken = default);
+    [Description("Creates a new catalog item. itemType must be \"Stock\", \"TimeBased\", or \"Quote\". currency defaults to USD, unit defaults to \"each\", stockQuantity and lowStockThreshold only apply to Stock items (lowStockThreshold defaults to 5). code is an optional SKU/item code shown on invoices.")]
+    Task<CatalogItemSummary> CreateCatalogItemAsync(Guid businessId, string name, CatalogItemType itemType, decimal price, string? currency, int? stockQuantity, string? unit, string? code, int? lowStockThreshold, CancellationToken cancellationToken = default);
 
     // Partial update — only supplied (non-null) fields change. itemType is deliberately not
     // patchable here (see UpdateCatalogItemAsync's own remarks).
-    [Description("Edits an existing catalog item's name, price, currency, unit, stock quantity, code, and/or active status. Only the fields provided are changed; omit a field to leave it as-is. Set active=false to deactivate an item, active=true to reactivate it.")]
-    Task<CatalogItemSummary> UpdateCatalogItemAsync(Guid businessId, Guid itemId, string? name, decimal? price, string? currency, int? stockQuantity, string? unit, bool? active, string? code, CancellationToken cancellationToken = default);
+    [Description("Edits an existing catalog item's name, price, currency, unit, stock quantity, low-stock threshold, code, and/or active status. Only the fields provided are changed; omit a field to leave it as-is. Set active=false to deactivate an item, active=true to reactivate it.")]
+    Task<CatalogItemSummary> UpdateCatalogItemAsync(Guid businessId, Guid itemId, string? name, decimal? price, string? currency, int? stockQuantity, string? unit, bool? active, string? code, int? lowStockThreshold, CancellationToken cancellationToken = default);
 
     // Not exposed to the AI assistant/MCP — a narrow, transport-facing capability (raw bytes),
     // not a business action the model has any reason to see or set.

@@ -273,6 +273,9 @@ namespace AiBusinessPlatform.Infrastructure.Data.Migrations
                     b.Property<int>("ItemType")
                         .HasColumnType("integer");
 
+                    b.Property<int>("LowStockThreshold")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text");
@@ -306,6 +309,7 @@ namespace AiBusinessPlatform.Infrastructure.Data.Migrations
                             CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
                             Currency = "USD",
                             ItemType = 0,
+                            LowStockThreshold = 5,
                             Name = "Cement (50kg bag)",
                             Price = 12.50m,
                             StockQuantity = 120,
@@ -320,6 +324,7 @@ namespace AiBusinessPlatform.Infrastructure.Data.Migrations
                             CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
                             Currency = "USD",
                             ItemType = 0,
+                            LowStockThreshold = 5,
                             Name = "Claw Hammer",
                             Price = 8.00m,
                             StockQuantity = 35,
@@ -334,6 +339,7 @@ namespace AiBusinessPlatform.Infrastructure.Data.Migrations
                             CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
                             Currency = "USD",
                             ItemType = 0,
+                            LowStockThreshold = 5,
                             Name = "Exterior Paint (5L)",
                             Price = 22.00m,
                             StockQuantity = 40,
@@ -530,6 +536,63 @@ namespace AiBusinessPlatform.Infrastructure.Data.Migrations
                     b.HasIndex("DocumentId");
 
                     b.ToTable("DocumentChunks");
+                });
+
+            modelBuilder.Entity("AiBusinessPlatform.Domain.Entities.EcoCashConnection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BusinessId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CountryCode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Location")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("MerchantCode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("MerchantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("MerchantNumber")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("MerchantPin")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Password")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SuperMerchantName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TerminalId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("EcoCashConnections");
                 });
 
             modelBuilder.Entity("AiBusinessPlatform.Domain.Entities.Expense", b =>
@@ -842,6 +905,9 @@ namespace AiBusinessPlatform.Infrastructure.Data.Migrations
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EcoCashEndUserId")
+                        .HasColumnType("text");
 
                     b.Property<string>("ExternalReference")
                         .HasColumnType("text");

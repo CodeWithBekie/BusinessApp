@@ -66,4 +66,11 @@ public class OrderMcpTools(IOrderTools orderTools, ICurrentTenantProvider tenant
         permissionChecker.EnsurePermission(Permission.ManageOrders);
         return orderTools.UpdatePaymentProviderAsync(tenantProvider.CurrentBusinessId, orderId, provider, cancellationToken);
     }
+
+    [McpServerTool(Name = "pay_order_with_ecocash"), Description("Initiates an EcoCash payment charge to the given phone number for one of this business's own Invoiced (unpaid) orders — use when the owner has the customer's EcoCash number and wants to collect payment now, or to retry with a corrected number after the automatic invoice-time attempt used the wrong one. Resolve orderId via get_order or list_orders first — never guess an id. Fails if the business has no EcoCash or Paynow gateway connected yet, or if the order isn't Invoiced. Only call when the owner has clearly and explicitly asked to charge this order.")]
+    public Task<OrderDetailSummary> PayOrderWithEcoCash(Guid orderId, string customerPhoneNumber, CancellationToken cancellationToken = default)
+    {
+        permissionChecker.EnsurePermission(Permission.ManageOrders);
+        return orderTools.InitiateEcoCashPaymentAsync(tenantProvider.CurrentBusinessId, orderId, customerPhoneNumber, cancellationToken);
+    }
 }

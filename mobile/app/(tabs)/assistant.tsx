@@ -2,9 +2,12 @@ import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
-import { apiClient, AssistantResourceSummary, ElicitationSchema, streamAssistantChat } from '@/src/api/client';
+import { Icon } from '@/components/ui/Icon';
+import { apiClient, AssistantPrompt, AssistantResourceSummary, ElicitationSchema, streamAssistantChat } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
+import Colors from '@/constants/Colors';
+import { radius, semanticColors, shadows, spacing, typography } from '@/constants/theme';
 import { useIsOnline } from '@/src/offline/networkStatus';
 
 interface ChatMessage {
@@ -22,10 +25,15 @@ interface PendingElicitation {
   schema: ElicitationSchema;
 }
 
-const SUGGESTIONS = ['How are sales this week?', 'What were our top-selling items this month?', 'Any sales today?'];
+const FALLBACK_SUGGESTIONS: AssistantPrompt[] = [
+  { name: 'sales_this_week', title: 'How are sales this week?', message: 'How are sales this week? Give me a quick summary.' },
+  { name: 'top_selling_items', title: 'What were our top-selling items this month?', message: 'What were our top-selling items this month?' },
+  { name: 'sales_today', title: 'Any sales today?', message: 'Any sales today? Give me the total and a quick breakdown.' },
+];
 
 export default function AssistantScreen() {
   const colorScheme = useColorScheme();
+  const tint = Colors[colorScheme].tint;
   const isOnline = useIsOnline();
   const { attachUri, attachLabel } = useLocalSearchParams<{ attachUri?: string; attachLabel?: string }>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -37,7 +45,12 @@ export default function AssistantScreen() {
   const [pendingElicitation, setPendingElicitation] = useState<PendingElicitation | null>(null);
   const [elicitationValues, setElicitationValues] = useState<Record<string, string>>({});
   const [submittingElicitation, setSubmittingElicitation] = useState(false);
+  const [suggestions, setSuggestions] = useState<AssistantPrompt[]>(FALLBACK_SUGGESTIONS);
   const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    apiClient.getAssistantPrompts().then(setSuggestions).catch(() => setSuggestions(FALLBACK_SUGGESTIONS));
+  }, []);
 
   // A deep link from Order/Purchase-Order detail ("Ask Assistant about this") presets an attachment.
   useEffect(() => {
@@ -165,9 +178,14 @@ export default function AssistantScreen() {
             <Text style={[styles.emptyText, colorScheme === 'dark' ? styles.metaDark : styles.metaLight]}>
               Ask about your sales performance or anything from your uploaded business documents.
             </Text>
-            {SUGGESTIONS.map((suggestion) => (
-              <Pressable key={suggestion} style={styles.suggestionChip} onPress={() => send(suggestion)}>
-                <Text style={styles.suggestionText}>{suggestion}</Text>
+            {suggestions.map((suggestion) => (
+              <Pressable key={suggestion.name} onPress={() => send(suggestion.message)}>
+                {({ pressed }) => (
+                  <View style={[styles.suggestionChip, pressed && styles.suggestionChipPressed]} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+                    <Icon name="sparkles" size={14} color={tint} />
+                    <Text style={[styles.suggestionText, { color: tint }]}>{suggestion.title}</Text>
+                  </View>
+                )}
               </Pressable>
             ))}
           </View>
@@ -203,8 +221,11 @@ export default function AssistantScreen() {
       {attachedResources.length > 0 && (
         <View style={styles.attachmentRow} lightColor="transparent" darkColor="transparent">
           {attachedResources.map((resource) => (
-            <Pressable key={resource.uri} style={styles.attachmentChip} onPress={() => removeAttachment(resource.uri)}>
-              <Text style={styles.attachmentChipText}>📎 {resource.title ?? resource.name ?? resource.uri} ✕</Text>
+            <Pressable key={resource.uri} style={[styles.attachmentChip, { borderColor: tint }]} onPress={() => removeAttachment(resource.uri)}>
+              <Icon name="paperclip" size={11} color={tint} />
+              <Text style={[styles.attachmentChipText, { color: tint }]}>
+                {resource.title ?? resource.name ?? resource.uri} ✕
+              </Text>
             </Pressable>
           ))}
         </View>
@@ -214,7 +235,7 @@ export default function AssistantScreen() {
 
       <View style={styles.inputRow} lightColor="transparent" darkColor="transparent">
         <Pressable style={[styles.attachButton, !isOnline && styles.sendButtonDisabled]} onPress={openAttachSheet} disabled={!isOnline}>
-          <Text style={styles.attachButtonText}>📎</Text>
+          <Icon name="paperclip" size={16} color={tint} />
         </Pressable>
         <TextInput
           style={[styles.input, colorScheme === 'dark' ? styles.inputDark : styles.inputLight]}
@@ -226,7 +247,7 @@ export default function AssistantScreen() {
           returnKeyType="send"
         />
         <Pressable
-          style={[styles.sendButton, (sending || !isOnline) && styles.sendButtonDisabled]}
+          style={[styles.sendButton, { backgroundColor: tint }, (sending || !isOnline) && styles.sendButtonDisabled]}
           disabled={sending || !isOnline}
           onPress={() => send(input)}
         >
@@ -245,8 +266,12 @@ export default function AssistantScreen() {
             {availableResources?.map((resource) => {
               const attached = attachedResources.some((r) => r.uri === resource.uri);
               return (
-                <Pressable key={resource.uri} style={[styles.resourceOption, attached && styles.resourceOptionActive]} onPress={() => toggleAttachment(resource)}>
-                  <Text style={[styles.resourceOptionText, attached && styles.resourceOptionTextActive]}>
+                <Pressable
+                  key={resource.uri}
+                  style={[styles.resourceOption, attached && { borderColor: tint, backgroundColor: 'rgba(0,122,255,0.08)' }]}
+                  onPress={() => toggleAttachment(resource)}
+                >
+                  <Text style={[styles.resourceOptionText, attached && { color: tint, fontWeight: '600' }]}>
                     {attached ? '✓ ' : ''}
                     {resource.title ?? resource.name ?? resource.uri}
                   </Text>
@@ -288,7 +313,7 @@ export default function AssistantScreen() {
                     <Text style={styles.modalCancelText}>Decline</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.modalButton, styles.sendButton]}
+                    style={[styles.modalButton, styles.sendButton, { backgroundColor: tint }]}
                     disabled={submittingElicitation}
                     onPress={() => submitElicitation('accept')}
                   >
@@ -306,37 +331,40 @@ export default function AssistantScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 24, paddingHorizontal: 16 },
-  title: { fontSize: 20, fontWeight: 'bold' },
+  title: { ...typography.title },
   separator: { marginVertical: 16, height: 1, width: '100%' },
   messages: { flex: 1 },
   messagesContent: { paddingBottom: 16 },
   emptyState: { paddingVertical: 12 },
   emptyText: { fontSize: 14, marginBottom: 12 },
   suggestionChip: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs + 2,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md + 2,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.sm,
     alignSelf: 'flex-start',
+    ...shadows.card,
   },
-  suggestionText: { fontSize: 13, color: '#007aff', fontWeight: '500' },
-  bubble: { padding: 12, borderRadius: 10, marginBottom: 10, maxWidth: '88%', borderWidth: 1, borderColor: '#ccc' },
+  suggestionChipPressed: { opacity: 0.7 },
+  suggestionText: { fontSize: 13, fontWeight: '500' },
+  bubble: { padding: spacing.md, borderRadius: radius.md, marginBottom: spacing.sm + 2, maxWidth: '88%', ...shadows.card },
   userBubble: { alignSelf: 'flex-end' },
   assistantBubble: { alignSelf: 'flex-start' },
   bubbleText: { fontSize: 14, lineHeight: 20 },
   inlineSpinner: { alignSelf: 'flex-start', marginTop: 6 },
   citations: { fontSize: 11, marginTop: 8, fontStyle: 'italic' },
   toolsUsed: { fontSize: 11, marginTop: 4 },
-  error: { fontSize: 12, color: '#c0392b', marginTop: 6 },
+  error: { fontSize: 12, color: semanticColors.danger, marginTop: 6 },
   metaLight: { color: '#666' },
   metaDark: { color: '#aaa' },
-  inputRow: { flexDirection: 'row', gap: 8, paddingVertical: 12, alignItems: 'center' },
-  input: { flex: 1, borderWidth: 1, borderColor: '#ccc', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10 },
+  inputRow: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.md, alignItems: 'center' },
+  input: { flex: 1, borderWidth: 1, borderColor: '#ccc', borderRadius: radius.lg, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 2 },
   inputLight: { color: '#000' },
   inputDark: { color: '#fff' },
-  sendButton: { backgroundColor: '#007aff', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20 },
+  sendButton: { paddingHorizontal: spacing.lg + 2, paddingVertical: spacing.sm + 2, borderRadius: radius.lg },
   sendButtonDisabled: { opacity: 0.6 },
   sendButtonText: { color: '#fff', fontWeight: '600' },
   attachButton: {
@@ -348,10 +376,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  attachButtonText: { fontSize: 16 },
-  attachmentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingBottom: 6 },
-  attachmentChip: { borderWidth: 1, borderColor: '#007aff', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4 },
-  attachmentChipText: { fontSize: 11, color: '#007aff', fontWeight: '600' },
+  attachmentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs + 2, paddingBottom: spacing.xs + 2 },
+  attachmentChip: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 14, paddingHorizontal: spacing.sm + 2, paddingVertical: 4 },
+  attachmentChipText: { fontSize: 11, fontWeight: '600' },
   loading: { marginVertical: 16 },
   modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   modalCard: { width: '100%', maxWidth: 360, borderRadius: 12, padding: 20 },
@@ -363,8 +390,6 @@ const styles = StyleSheet.create({
   modalCancelButtonWide: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginTop: 12 },
   modalCancelText: { fontWeight: '600' },
   resourceOption: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 8 },
-  resourceOptionActive: { borderColor: '#007aff', backgroundColor: 'rgba(0,122,255,0.08)' },
   resourceOptionText: { fontSize: 14 },
-  resourceOptionTextActive: { color: '#007aff', fontWeight: '600' },
   fieldLabel: { fontSize: 12, fontWeight: '600', opacity: 0.7, marginBottom: 4, marginTop: 8 },
 });

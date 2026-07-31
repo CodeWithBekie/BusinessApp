@@ -222,7 +222,60 @@ public static class WebhooksEndpoints
             await queuePublisher.PublishAsync("payments.confirmed", JsonSerializer.Serialize(envelope), cancellationToken);
             return Results.Ok();
         });
+
+        // Real EcoCash Instant Payment sandbox webhook (notifyUrl callback). KNOWN GAP: unlike
+        // Paynow's hash-signed callback, EcoCash's documented API has no signature/verification
+        // scheme for notifyUrl deliveries — this route trusts the payload's reference match alone
+        // (same trust level as /payments/manual's dev stand-in above), which is a real gap to
+        // revisit once the actual webhook contract is confirmed live against the sandbox. Field
+        // names below ("referenceCode"/"clientCorrelator", "transactionOperationStatus"/"status")
+        // are best-effort guesses for the same reason EcoCashClient's response parsing is — only
+        // the charge/refund REQUEST shape was documented, not this callback's payload.
+        group.MapPost("/payments/ecocash", async (
+            HttpRequest request, IQueuePublisher queuePublisher, AiBusinessPlatformDbContext db,
+            ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
+        {
+            var logger = loggerFactory.CreateLogger("PaymentWebhook");
+
+            using var doc = await JsonDocument.ParseAsync(request.Body, cancellationToken: cancellationToken);
+            var payload = doc.RootElement;
+            logger.LogInformation("EcoCash webhook payload: {Payload}", payload.GetRawText());
+
+            var reference = TryGetString(payload, "referenceCode") ?? TryGetString(payload, "clientCorrelator");
+            if (string.IsNullOrEmpty(reference))
+            {
+                logger.LogWarning("EcoCash webhook had no referenceCode/clientCorrelator field — ignoring.");
+                return Results.Ok();
+            }
+
+            // Pre-tenant lookup: which business this belongs to is exactly what we're resolving.
+            var payment = await db.Payments.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.ProviderReference == reference, cancellationToken);
+            if (payment is null)
+            {
+                logger.LogWarning("EcoCash webhook for unknown reference {Reference} — ignoring.", reference);
+                return Results.Ok();
+            }
+
+            var status = TryGetString(payload, "transactionOperationStatus") ?? TryGetString(payload, "status");
+            var isSuccess = status is not null &&
+                (status.Contains("Charged", StringComparison.OrdinalIgnoreCase) || status.Contains("Complet", StringComparison.OrdinalIgnoreCase) ||
+                 status.Contains("Success", StringComparison.OrdinalIgnoreCase));
+            if (!isSuccess)
+            {
+                logger.LogInformation("EcoCash webhook status '{Status}' for reference {Reference} is not handled — ignoring.", status, reference);
+                return Results.Ok();
+            }
+
+            var envelope = new PaymentConfirmedQueueMessage(payment.BusinessId, payment.OrderId);
+            await queuePublisher.PublishAsync("payments.confirmed", JsonSerializer.Serialize(envelope), cancellationToken);
+            return Results.Ok();
+        });
     }
+
+    private static string? TryGetString(JsonElement element, string propertyName) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.String
+            ? prop.GetString()
+            : null;
 
     // Delivery/read status tracking for outbound sends — updates the Message row IWhatsAppMessageService
     // already created (matched by WhatsAppMessageId/wamid) rather than creating anything new.

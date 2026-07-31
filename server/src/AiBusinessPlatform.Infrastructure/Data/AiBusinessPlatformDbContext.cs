@@ -35,6 +35,7 @@ public class AiBusinessPlatformDbContext : DbContext
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<WhatsAppConnection> WhatsAppConnections => Set<WhatsAppConnection>();
     public DbSet<PaynowConnection> PaynowConnections => Set<PaynowConnection>();
+    public DbSet<EcoCashConnection> EcoCashConnections => Set<EcoCashConnection>();
     public DbSet<McpIntegrationAccount> McpIntegrationAccounts => Set<McpIntegrationAccount>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();

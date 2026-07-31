@@ -1,10 +1,13 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, StyleSheet, TextInput } from 'react-native';
 
+import { Button } from '@/components/ui/Button';
+import { Section } from '@/components/ui/Section';
 import { apiClient, Supplier } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
+import { semanticColors, spacing } from '@/constants/theme';
 import { useIsOnline } from '@/src/offline/networkStatus';
 
 function useInputStyle() {
@@ -105,35 +108,34 @@ export default function SupplierScreen() {
       {loadError && <Text style={styles.error}>{loadError}</Text>}
       {!loading && !loadError && (
         <>
-          <Text style={styles.label}>Name</Text>
-          <TextInput style={inputStyle} placeholder="e.g. Zimbuild Hardware Wholesalers" value={name} onChangeText={setName} />
+          <Section title="Supplier details">
+            <Text style={styles.label}>Name</Text>
+            <TextInput style={inputStyle} placeholder="e.g. Zimbuild Hardware Wholesalers" value={name} onChangeText={setName} />
 
-          <Text style={styles.label}>Contact phone</Text>
-          <TextInput style={inputStyle} placeholder="e.g. 26377xxxxxxx" value={contactPhone} onChangeText={setContactPhone} keyboardType="phone-pad" />
+            <Text style={styles.label}>Contact phone</Text>
+            <TextInput style={inputStyle} placeholder="e.g. 26377xxxxxxx" value={contactPhone} onChangeText={setContactPhone} keyboardType="phone-pad" />
 
-          <Text style={styles.label}>Email</Text>
-          <TextInput style={inputStyle} placeholder="e.g. orders@supplier.com" value={email} onChangeText={setEmail} keyboardType="email-address" />
+            <Text style={styles.label}>Email</Text>
+            <TextInput style={inputStyle} placeholder="e.g. orders@supplier.com" value={email} onChangeText={setEmail} keyboardType="email-address" />
 
-          <Text style={styles.label}>Notes</Text>
-          <TextInput style={inputStyle} placeholder="Optional" value={notes} onChangeText={setNotes} />
+            <Text style={styles.label}>Notes</Text>
+            <TextInput style={inputStyle} placeholder="Optional" value={notes} onChangeText={setNotes} />
+          </Section>
 
           {saveError && <Text style={styles.error}>{saveError}</Text>}
           {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
 
-          <Pressable style={[styles.button, (saving || !isOnline) && styles.buttonDisabled]} disabled={saving || !isOnline} onPress={save}>
-            <Text style={styles.buttonText}>{saving ? 'Saving…' : isNew ? 'Add supplier' : 'Save changes'}</Text>
-          </Pressable>
+          <Button label={saving ? 'Saving…' : isNew ? 'Add supplier' : 'Save changes'} onPress={save} disabled={saving || !isOnline} />
 
           {!isNew && existing && (
-            <Pressable
-              style={[styles.secondaryButton, existing.active ? styles.deactivateButton : styles.reactivateButton, !isOnline && styles.buttonDisabled]}
-              disabled={togglingActive || !isOnline}
-              onPress={toggleActive}
-            >
-              <Text style={[styles.secondaryButtonText, existing.active ? styles.deactivateText : styles.reactivateText]}>
-                {togglingActive ? 'Updating…' : existing.active ? 'Deactivate supplier' : 'Reactivate supplier'}
-              </Text>
-            </Pressable>
+            <View style={styles.secondaryButtonWrap} lightColor="transparent" darkColor="transparent">
+              <Button
+                label={togglingActive ? 'Updating…' : existing.active ? 'Deactivate supplier' : 'Reactivate supplier'}
+                variant={existing.active ? 'destructive' : 'secondary'}
+                onPress={toggleActive}
+                disabled={togglingActive || !isOnline}
+              />
+            </View>
           )}
         </>
       )}
@@ -144,24 +146,16 @@ export default function SupplierScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 32 },
   loading: { marginTop: 40 },
-  error: { color: '#c0392b', marginTop: 8, marginBottom: 8 },
-  label: { fontSize: 13, fontWeight: '600', opacity: 0.7, marginTop: 14, marginBottom: 6 },
+  error: { color: semanticColors.danger, marginTop: 8, marginBottom: 8 },
+  label: { fontSize: 13, fontWeight: '600', opacity: 0.7, marginTop: spacing.md, marginBottom: spacing.xs + 2 },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderRadius: 8,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.sm,
   },
   inputLight: { color: '#000' },
   inputDark: { color: '#fff' },
-  button: { backgroundColor: '#007aff', paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 24 },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontWeight: '600', fontSize: 15 },
-  secondaryButton: { paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginTop: 12, borderWidth: 1 },
-  deactivateButton: { borderColor: '#c0392b' },
-  reactivateButton: { borderColor: '#2e7d32' },
-  secondaryButtonText: { fontWeight: '600' },
-  deactivateText: { color: '#c0392b' },
-  reactivateText: { color: '#2e7d32' },
+  secondaryButtonWrap: { marginTop: spacing.sm },
 });

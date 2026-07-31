@@ -198,7 +198,7 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
         return new ReserveStockResult(releasedItemId, true, null);
     }
 
-    public async Task<IReadOnlyList<CatalogItemSummary>> ListCatalogItemsAsync(Guid businessId, bool? activeOnly, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<CatalogItemSummary>> ListCatalogItemsAsync(Guid businessId, bool? activeOnly, bool? lowStockOnly, CancellationToken cancellationToken = default)
     {
         if (businessId != tenantProvider.CurrentBusinessId)
         {
@@ -210,6 +210,10 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
         {
             query = query.Where(c => c.Active);
         }
+        if (lowStockOnly == true)
+        {
+            query = query.Where(c => c.ItemType == CatalogItemType.Stock && c.StockQuantity != null && c.StockQuantity <= c.LowStockThreshold);
+        }
 
         // Projects directly to CatalogItemSummary (translated to a SQL column list by EF Core) so
         // ImageData bytes are never fetched for a list of items — only a single-item image lookup
@@ -218,13 +222,14 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
             .OrderBy(c => c.Name)
             .Select(c => new CatalogItemSummary(
                 c.Id, c.Name, c.Code, c.ItemType, c.Price, c.Currency, c.StockQuantity, c.Unit, c.Active,
-                c.CreatedAt, c.UpdatedAt, c.ImageData != null))
+                c.CreatedAt, c.UpdatedAt, c.ImageData != null, c.LowStockThreshold,
+                c.ItemType == CatalogItemType.Stock && c.StockQuantity != null && c.StockQuantity <= c.LowStockThreshold))
             .ToListAsync(cancellationToken);
     }
 
     public async Task<CatalogItemSummary> CreateCatalogItemAsync(
         Guid businessId, string name, CatalogItemType itemType, decimal price, string? currency, int? stockQuantity, string? unit,
-        string? code, CancellationToken cancellationToken = default)
+        string? code, int? lowStockThreshold, CancellationToken cancellationToken = default)
     {
         if (businessId != tenantProvider.CurrentBusinessId)
         {
@@ -242,6 +247,10 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
         {
             throw new ArgumentException("stockQuantity cannot be negative.", nameof(stockQuantity));
         }
+        if (lowStockThreshold is < 0)
+        {
+            throw new ArgumentException("lowStockThreshold cannot be negative.", nameof(lowStockThreshold));
+        }
 
         var item = new CatalogItem
         {
@@ -253,6 +262,7 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
             Price = price,
             Currency = string.IsNullOrWhiteSpace(currency) ? "USD" : currency.Trim(),
             StockQuantity = itemType == CatalogItemType.Stock ? stockQuantity ?? 0 : null,
+            LowStockThreshold = lowStockThreshold ?? 5,
             Unit = string.IsNullOrWhiteSpace(unit) ? "each" : unit.Trim(),
             Active = true,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -266,7 +276,7 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
 
     public async Task<CatalogItemSummary> UpdateCatalogItemAsync(
         Guid businessId, Guid itemId, string? name, decimal? price, string? currency, int? stockQuantity, string? unit, bool? active,
-        string? code, CancellationToken cancellationToken = default)
+        string? code, int? lowStockThreshold, CancellationToken cancellationToken = default)
     {
         if (businessId != tenantProvider.CurrentBusinessId)
         {
@@ -303,6 +313,14 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
                 throw new ArgumentException("stockQuantity cannot be negative.", nameof(stockQuantity));
             }
             item.StockQuantity = stockQuantity;
+        }
+        if (lowStockThreshold is not null)
+        {
+            if (lowStockThreshold < 0)
+            {
+                throw new ArgumentException("lowStockThreshold cannot be negative.", nameof(lowStockThreshold));
+            }
+            item.LowStockThreshold = lowStockThreshold.Value;
         }
         if (unit is not null)
         {
@@ -380,5 +398,6 @@ public class CatalogTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantP
 
     private static CatalogItemSummary ToSummary(CatalogItem item) => new(
         item.Id, item.Name, item.Code, item.ItemType, item.Price, item.Currency,
-        item.StockQuantity, item.Unit, item.Active, item.CreatedAt, item.UpdatedAt, item.ImageData != null);
+        item.StockQuantity, item.Unit, item.Active, item.CreatedAt, item.UpdatedAt, item.ImageData != null,
+        item.LowStockThreshold, item.ItemType == CatalogItemType.Stock && item.StockQuantity is not null && item.StockQuantity <= item.LowStockThreshold);
 }

@@ -22,21 +22,21 @@ public class CatalogMcpTools(ICatalogTools catalogTools, ICurrentTenantProvider 
     // Nullable parameters need an explicit `= null` default — without one, the MCP SDK's
     // reflection-based schema generation marks them "required", and a caller that omits an
     // optional argument (as models routinely do) gets a hard "missing required parameter" error.
-    [McpServerTool(Name = "list_catalog_items"), Description("Lists this business's catalog items, optionally filtered to only active (non-deactivated) items.")]
-    public Task<IReadOnlyList<CatalogItemSummary>> ListCatalogItems(bool? activeOnly = null, CancellationToken cancellationToken = default)
-        => catalogTools.ListCatalogItemsAsync(tenantProvider.CurrentBusinessId, activeOnly, cancellationToken);
+    [McpServerTool(Name = "list_catalog_items"), Description("Lists this business's catalog items, optionally filtered to only active (non-deactivated) items and/or only items at or below their low-stock threshold.")]
+    public Task<IReadOnlyList<CatalogItemSummary>> ListCatalogItems(bool? activeOnly = null, bool? lowStockOnly = null, CancellationToken cancellationToken = default)
+        => catalogTools.ListCatalogItemsAsync(tenantProvider.CurrentBusinessId, activeOnly, lowStockOnly, cancellationToken);
 
-    [McpServerTool(Name = "create_catalog_item"), Description("Creates a new catalog item. itemType must be \"Stock\", \"TimeBased\", or \"Quote\". currency defaults to USD, unit defaults to \"each\", stockQuantity only applies to Stock items. code is an optional SKU/item code shown on invoices. Only call this when the owner has clearly and explicitly asked to add a new item.")]
-    public Task<CatalogItemSummary> CreateCatalogItem(string name, CatalogItemType itemType, decimal price, string? currency = null, int? stockQuantity = null, string? unit = null, string? code = null, CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "create_catalog_item"), Description("Creates a new catalog item. itemType must be \"Stock\", \"TimeBased\", or \"Quote\". currency defaults to USD, unit defaults to \"each\", stockQuantity and lowStockThreshold only apply to Stock items (lowStockThreshold defaults to 5). code is an optional SKU/item code shown on invoices. Only call this when the owner has clearly and explicitly asked to add a new item.")]
+    public Task<CatalogItemSummary> CreateCatalogItem(string name, CatalogItemType itemType, decimal price, string? currency = null, int? stockQuantity = null, string? unit = null, string? code = null, int? lowStockThreshold = null, CancellationToken cancellationToken = default)
     {
         permissionChecker.EnsurePermission(Permission.ManageCatalog);
-        return catalogTools.CreateCatalogItemAsync(tenantProvider.CurrentBusinessId, name, itemType, price, currency, stockQuantity, unit, code, cancellationToken);
+        return catalogTools.CreateCatalogItemAsync(tenantProvider.CurrentBusinessId, name, itemType, price, currency, stockQuantity, unit, code, lowStockThreshold, cancellationToken);
     }
 
-    [McpServerTool(Name = "update_catalog_item"), Description("Edits an existing catalog item's name, price, currency, unit, stock quantity, code, and/or active status — only the fields provided are changed. Set active=false to deactivate an item, active=true to reactivate it. Only call this when the owner has clearly and explicitly asked for this change.")]
-    public Task<CatalogItemSummary> UpdateCatalogItem(Guid itemId, string? name = null, decimal? price = null, string? currency = null, int? stockQuantity = null, string? unit = null, bool? active = null, string? code = null, CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "update_catalog_item"), Description("Edits an existing catalog item's name, price, currency, unit, stock quantity, low-stock threshold, code, and/or active status — only the fields provided are changed. Set active=false to deactivate an item, active=true to reactivate it. Only call this when the owner has clearly and explicitly asked for this change.")]
+    public Task<CatalogItemSummary> UpdateCatalogItem(Guid itemId, string? name = null, decimal? price = null, string? currency = null, int? stockQuantity = null, string? unit = null, bool? active = null, string? code = null, int? lowStockThreshold = null, CancellationToken cancellationToken = default)
     {
         permissionChecker.EnsurePermission(Permission.ManageCatalog);
-        return catalogTools.UpdateCatalogItemAsync(tenantProvider.CurrentBusinessId, itemId, name, price, currency, stockQuantity, unit, active, code, cancellationToken);
+        return catalogTools.UpdateCatalogItemAsync(tenantProvider.CurrentBusinessId, itemId, name, price, currency, stockQuantity, unit, active, code, lowStockThreshold, cancellationToken);
     }
 }

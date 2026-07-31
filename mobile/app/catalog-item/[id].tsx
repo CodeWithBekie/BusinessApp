@@ -3,9 +3,14 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, TextInput } from 'react-native';
 
+import { Button } from '@/components/ui/Button';
+import { Chip } from '@/components/ui/Chip';
+import { Section } from '@/components/ui/Section';
 import { apiClient, CatalogItem, CatalogItemType } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
+import Colors from '@/constants/Colors';
+import { radius, semanticColors, spacing } from '@/constants/theme';
 import { CATALOG_ITEM_TYPE_LABELS, CATALOG_ITEM_TYPES } from '@/src/catalog/catalogItemType';
 import { useIsOnline } from '@/src/offline/networkStatus';
 
@@ -19,6 +24,8 @@ export default function CatalogItemScreen() {
   const router = useRouter();
   const inputStyle = useInputStyle();
   const isOnline = useIsOnline();
+  const colorScheme = useColorScheme();
+  const tint = Colors[colorScheme].tint;
   const isNew = id === 'new';
 
   const [loading, setLoading] = useState(!isNew);
@@ -32,6 +39,7 @@ export default function CatalogItemScreen() {
   const [currency, setCurrency] = useState('USD');
   const [unit, setUnit] = useState('each');
   const [stockQuantity, setStockQuantity] = useState('');
+  const [lowStockThreshold, setLowStockThreshold] = useState('5');
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -57,6 +65,7 @@ export default function CatalogItemScreen() {
         setCurrency(item.currency);
         setUnit(item.unit);
         setStockQuantity(item.stockQuantity?.toString() ?? '');
+        setLowStockThreshold(item.lowStockThreshold.toString());
       })
       .catch((err: Error) => setLoadError(err.message))
       .finally(() => setLoading(false));
@@ -74,10 +83,16 @@ export default function CatalogItemScreen() {
       return;
     }
     let parsedStock: number | null = null;
+    let parsedThreshold: number | undefined;
     if (itemType === 'Stock') {
       parsedStock = stockQuantity.trim() === '' ? 0 : Number(stockQuantity);
       if (!Number.isFinite(parsedStock) || parsedStock < 0 || !Number.isInteger(parsedStock)) {
         setSaveError('Stock quantity must be a valid non-negative whole number.');
+        return;
+      }
+      parsedThreshold = lowStockThreshold.trim() === '' ? 5 : Number(lowStockThreshold);
+      if (!Number.isFinite(parsedThreshold) || parsedThreshold < 0 || !Number.isInteger(parsedThreshold)) {
+        setSaveError('Low stock threshold must be a valid non-negative whole number.');
         return;
       }
     }
@@ -93,6 +108,7 @@ export default function CatalogItemScreen() {
           unit: unit.trim() || 'each',
           stockQuantity: parsedStock,
           code: code.trim() || null,
+          lowStockThreshold: parsedThreshold,
         });
       } else {
         await apiClient.updateCatalogItem(id, {
@@ -102,6 +118,7 @@ export default function CatalogItemScreen() {
           unit: unit.trim() || 'each',
           stockQuantity: itemType === 'Stock' ? parsedStock : undefined,
           code: code.trim() || null,
+          lowStockThreshold: itemType === 'Stock' ? parsedThreshold : undefined,
         });
       }
       router.back();
@@ -110,7 +127,7 @@ export default function CatalogItemScreen() {
     } finally {
       setSaving(false);
     }
-  }, [isNew, id, name, code, itemType, price, currency, unit, stockQuantity, router]);
+  }, [isNew, id, name, code, itemType, price, currency, unit, stockQuantity, lowStockThreshold, router]);
 
   const toggleActive = useCallback(async () => {
     if (!existing) return;
@@ -181,8 +198,7 @@ export default function CatalogItemScreen() {
       {!loading && !loadError && (
         <>
           {!isNew && existing && (
-            <>
-              <Text style={styles.label}>Photo</Text>
+            <Section title="Photo">
               <View style={styles.photoRow} lightColor="transparent" darkColor="transparent">
                 {existing.hasImage ? (
                   <Image source={{ uri: apiClient.getCatalogItemImageUrl(existing.id, existing.updatedAt) }} style={styles.photoPreview} />
@@ -193,18 +209,18 @@ export default function CatalogItemScreen() {
                 )}
                 <View style={styles.photoActions} lightColor="transparent" darkColor="transparent">
                   <Pressable
-                    style={[styles.photoButton, (imageUploading || !isOnline) && styles.buttonDisabled]}
+                    style={[styles.photoButton, { borderColor: tint }, (imageUploading || !isOnline) && styles.buttonDisabled]}
                     disabled={imageUploading || !isOnline}
                     onPress={() => pickImage('library')}
                   >
-                    <Text style={styles.photoButtonText}>{imageUploading ? 'Uploading…' : 'Choose photo'}</Text>
+                    <Text style={[styles.photoButtonText, { color: tint }]}>{imageUploading ? 'Uploading…' : 'Choose photo'}</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.photoButton, (imageUploading || !isOnline) && styles.buttonDisabled]}
+                    style={[styles.photoButton, { borderColor: tint }, (imageUploading || !isOnline) && styles.buttonDisabled]}
                     disabled={imageUploading || !isOnline}
                     onPress={() => pickImage('camera')}
                   >
-                    <Text style={styles.photoButtonText}>Take photo</Text>
+                    <Text style={[styles.photoButtonText, { color: tint }]}>Take photo</Text>
                   </Pressable>
                   {existing.hasImage && (
                     <Pressable disabled={imageUploading || !isOnline} onPress={removeImage}>
@@ -215,66 +231,65 @@ export default function CatalogItemScreen() {
               </View>
               {imageError && <Text style={styles.error}>{imageError}</Text>}
               {!isOnline && <Text style={styles.hint}>You're offline — connect to change the photo.</Text>}
-            </>
+            </Section>
           )}
 
-          <Text style={styles.label}>Name</Text>
-          <TextInput style={inputStyle} placeholder="e.g. Premium Widget" value={name} onChangeText={setName} />
+          <Section title="Item details">
+            <Text style={styles.label}>Name</Text>
+            <TextInput style={inputStyle} placeholder="e.g. Premium Widget" value={name} onChangeText={setName} />
 
-          <Text style={styles.label}>Code (optional)</Text>
-          <TextInput style={inputStyle} placeholder="e.g. SKU-1024" value={code} onChangeText={setCode} autoCapitalize="characters" />
+            <Text style={styles.label}>Code (optional)</Text>
+            <TextInput style={inputStyle} placeholder="e.g. SKU-1024" value={code} onChangeText={setCode} autoCapitalize="characters" />
 
-          <Text style={styles.label}>Item type</Text>
-          <View style={styles.typeRow} lightColor="transparent" darkColor="transparent">
-            {CATALOG_ITEM_TYPES.map((type) => {
-              const active = type === itemType;
-              return (
-                <Pressable
+            <Text style={styles.label}>Item type</Text>
+            <View style={styles.typeRow} lightColor="transparent" darkColor="transparent">
+              {CATALOG_ITEM_TYPES.map((type) => (
+                <Chip
                   key={type}
+                  label={CATALOG_ITEM_TYPE_LABELS[type]}
+                  active={type === itemType}
                   disabled={!isNew}
                   onPress={() => setItemType(type)}
-                  style={[styles.typeChip, active && styles.typeChipActive, !isNew && styles.typeChipDisabled]}
-                >
-                  <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>{CATALOG_ITEM_TYPE_LABELS[type]}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          {!isNew && <Text style={styles.hint}>Item type can't be changed after creation.</Text>}
+                  style={styles.typeChip}
+                />
+              ))}
+            </View>
+            {!isNew && <Text style={styles.hint}>Item type can't be changed after creation.</Text>}
 
-          <Text style={styles.label}>Price</Text>
-          <TextInput style={inputStyle} placeholder="0.00" value={price} onChangeText={setPrice} keyboardType="decimal-pad" />
+            <Text style={styles.label}>Price</Text>
+            <TextInput style={inputStyle} placeholder="0.00" value={price} onChangeText={setPrice} keyboardType="decimal-pad" />
 
-          <Text style={styles.label}>Currency</Text>
-          <TextInput style={inputStyle} placeholder="USD" value={currency} onChangeText={setCurrency} autoCapitalize="characters" />
+            <Text style={styles.label}>Currency</Text>
+            <TextInput style={inputStyle} placeholder="USD" value={currency} onChangeText={setCurrency} autoCapitalize="characters" />
 
-          <Text style={styles.label}>Unit</Text>
-          <TextInput style={inputStyle} placeholder="each" value={unit} onChangeText={setUnit} />
+            <Text style={styles.label}>Unit</Text>
+            <TextInput style={inputStyle} placeholder="each" value={unit} onChangeText={setUnit} />
 
-          {itemType === 'Stock' && (
-            <>
-              <Text style={styles.label}>Stock quantity</Text>
-              <TextInput style={inputStyle} placeholder="0" value={stockQuantity} onChangeText={setStockQuantity} keyboardType="number-pad" />
-            </>
-          )}
+            {itemType === 'Stock' && (
+              <>
+                <Text style={styles.label}>Stock quantity</Text>
+                <TextInput style={inputStyle} placeholder="0" value={stockQuantity} onChangeText={setStockQuantity} keyboardType="number-pad" />
+
+                <Text style={styles.label}>Low stock threshold</Text>
+                <TextInput style={inputStyle} placeholder="5" value={lowStockThreshold} onChangeText={setLowStockThreshold} keyboardType="number-pad" />
+              </>
+            )}
+          </Section>
 
           {saveError && <Text style={styles.error}>{saveError}</Text>}
           {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
 
-          <Pressable style={[styles.button, (saving || !isOnline) && styles.buttonDisabled]} disabled={saving || !isOnline} onPress={save}>
-            <Text style={styles.buttonText}>{saving ? 'Saving…' : isNew ? 'Add item' : 'Save changes'}</Text>
-          </Pressable>
+          <Button label={saving ? 'Saving…' : isNew ? 'Add item' : 'Save changes'} onPress={save} disabled={saving || !isOnline} />
 
           {!isNew && existing && (
-            <Pressable
-              style={[styles.secondaryButton, existing.active ? styles.deactivateButton : styles.reactivateButton, !isOnline && styles.buttonDisabled]}
-              disabled={togglingActive || !isOnline}
-              onPress={toggleActive}
-            >
-              <Text style={[styles.secondaryButtonText, existing.active ? styles.deactivateText : styles.reactivateText]}>
-                {togglingActive ? 'Updating…' : existing.active ? 'Deactivate item' : 'Reactivate item'}
-              </Text>
-            </Pressable>
+            <View style={styles.secondaryButtonWrap} lightColor="transparent" darkColor="transparent">
+              <Button
+                label={togglingActive ? 'Updating…' : existing.active ? 'Deactivate item' : 'Reactivate item'}
+                variant={existing.active ? 'destructive' : 'secondary'}
+                onPress={toggleActive}
+                disabled={togglingActive || !isOnline}
+              />
+            </View>
           )}
         </>
       )}
@@ -285,47 +300,36 @@ export default function CatalogItemScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 32 },
   loading: { marginTop: 40 },
-  error: { color: '#c0392b', marginTop: 8, marginBottom: 8 },
-  label: { fontSize: 13, fontWeight: '600', opacity: 0.7, marginTop: 14, marginBottom: 6 },
+  error: { color: semanticColors.danger, marginTop: 8, marginBottom: 8 },
+  label: { fontSize: 13, fontWeight: '600', opacity: 0.7, marginTop: spacing.md, marginBottom: spacing.xs + 2 },
   hint: { fontSize: 12, opacity: 0.5, marginTop: -2, marginBottom: 4 },
-  photoRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
-  photoPreview: { width: 72, height: 72, borderRadius: 10 },
+  photoRow: { flexDirection: 'row', gap: spacing.md, alignItems: 'center' },
+  photoPreview: { width: 72, height: 72, borderRadius: radius.md },
   photoPlaceholder: {
     width: 72,
     height: 72,
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: '#ccc',
     alignItems: 'center',
     justifyContent: 'center',
   },
   photoPlaceholderText: { fontSize: 11, opacity: 0.5, textAlign: 'center' },
-  photoActions: { gap: 6 },
-  photoButton: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: '#007aff', alignSelf: 'flex-start' },
-  photoButtonText: { color: '#007aff', fontWeight: '600', fontSize: 13 },
-  removePhotoText: { color: '#c0392b', fontWeight: '600', fontSize: 12 },
+  photoActions: { gap: spacing.xs + 2 },
+  photoButton: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.sm, borderWidth: 1, alignSelf: 'flex-start' },
+  photoButtonText: { fontWeight: '600', fontSize: 13 },
+  removePhotoText: { color: semanticColors.danger, fontWeight: '600', fontSize: 12 },
+  buttonDisabled: { opacity: 0.6 },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderRadius: 8,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.sm,
   },
   inputLight: { color: '#000' },
   inputDark: { color: '#fff' },
-  typeRow: { flexDirection: 'row', gap: 8 },
-  typeChip: { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ccc', alignItems: 'center' },
-  typeChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
-  typeChipDisabled: { opacity: 0.5 },
-  typeChipText: { fontSize: 13, fontWeight: '600', opacity: 0.7 },
-  typeChipTextActive: { color: '#fff', opacity: 1 },
-  button: { backgroundColor: '#007aff', paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 24 },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontWeight: '600', fontSize: 15 },
-  secondaryButton: { paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginTop: 12, borderWidth: 1 },
-  deactivateButton: { borderColor: '#c0392b' },
-  reactivateButton: { borderColor: '#2e7d32' },
-  secondaryButtonText: { fontWeight: '600' },
-  deactivateText: { color: '#c0392b' },
-  reactivateText: { color: '#2e7d32' },
+  typeRow: { flexDirection: 'row', gap: spacing.sm },
+  typeChip: { flex: 1 },
+  secondaryButtonWrap: { marginTop: spacing.sm },
 });

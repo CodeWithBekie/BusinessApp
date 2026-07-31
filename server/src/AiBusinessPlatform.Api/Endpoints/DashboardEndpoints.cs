@@ -71,8 +71,8 @@ public static class DashboardEndpoints
         // FR15 (Section 6.3) — thin mapping over ICatalogTools, the same functions the MCP
         // server's list_catalog_items/create_catalog_item/update_catalog_item tools call
         // (Section 10.2/10.7's "one function, multiple entry points").
-        api.MapGet("/catalog", async (ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
-            Results.Ok(await catalogTools.ListCatalogItemsAsync(tenantProvider.CurrentBusinessId, activeOnly: null, ct)));
+        api.MapGet("/catalog", async (bool? lowStockOnly, ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+            Results.Ok(await catalogTools.ListCatalogItemsAsync(tenantProvider.CurrentBusinessId, activeOnly: null, lowStockOnly, ct)));
 
         api.MapPost("/catalog", async (
             CreateCatalogItemRequest request, ICatalogTools catalogTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
@@ -81,7 +81,7 @@ public static class DashboardEndpoints
             {
                 var item = await catalogTools.CreateCatalogItemAsync(
                     tenantProvider.CurrentBusinessId, request.Name, request.ItemType, request.Price,
-                    request.Currency, request.StockQuantity, request.Unit, request.Code, ct);
+                    request.Currency, request.StockQuantity, request.Unit, request.Code, request.LowStockThreshold, ct);
                 return Results.Created($"/api/catalog/{item.Id}", item);
             }
             catch (ArgumentException ex)
@@ -97,7 +97,7 @@ public static class DashboardEndpoints
             {
                 var item = await catalogTools.UpdateCatalogItemAsync(
                     tenantProvider.CurrentBusinessId, id, request.Name, request.Price,
-                    request.Currency, request.StockQuantity, request.Unit, request.Active, request.Code, ct);
+                    request.Currency, request.StockQuantity, request.Unit, request.Active, request.Code, request.LowStockThreshold, ct);
                 return Results.Ok(item);
             }
             catch (ArgumentException ex)
@@ -244,6 +244,75 @@ public static class DashboardEndpoints
             {
                 var result = await orderTools.UpdatePaymentProviderAsync(tenantProvider.CurrentBusinessId, id, request.Provider, ct);
                 return Results.Ok(result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        }).RequireAuthorization("Permission:ManageOrders");
+
+        // Business owner-initiated EcoCash charge — thin mapping over
+        // IOrderTools.InitiateEcoCashPaymentAsync, the same function the MCP server's
+        // pay_order_with_ecocash tool calls. Distinct from the customer's own self-service
+        // /api/marketplace/orders/{id}/pay/ecocash — this one lets the owner charge a phone number
+        // they supply (e.g. a WhatsApp order's real number, or a correction to the auto-attempt).
+        api.MapPost("/orders/{id:guid}/pay/ecocash", async (
+            Guid id, PayOrderWithEcoCashRequest request, IOrderTools orderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.PhoneNumber))
+            {
+                return Results.BadRequest("phoneNumber is required.");
+            }
+            try
+            {
+                var result = await orderTools.InitiateEcoCashPaymentAsync(tenantProvider.CurrentBusinessId, id, request.PhoneNumber, ct);
+                return Results.Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        }).RequireAuthorization("Permission:ManageOrders");
+
+        // Delivery tracking — assigns (or reassigns) a driver, thin mapping over
+        // IDeliveryTools.AssignDriverAsync, the same function the MCP server's
+        // assign_delivery_driver tool calls.
+        api.MapPost("/orders/{id:guid}/delivery/driver", async (
+            Guid id, AssignDriverRequest request, IDeliveryTools deliveryTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await deliveryTools.AssignDriverAsync(tenantProvider.CurrentBusinessId, id, request.DriverName, ct);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ex.Message);
+            }
+        }).RequireAuthorization("Permission:ManageOrders");
+
+        // Progresses a delivery's status (Pending -> Assigned -> InTransit -> Delivered), thin
+        // mapping over IDeliveryTools.UpdateDeliveryStatusAsync, the same function the MCP
+        // server's update_delivery_status tool calls.
+        api.MapPatch("/orders/{id:guid}/delivery/status", async (
+            Guid id, UpdateDeliveryStatusRequest request, IDeliveryTools deliveryTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await deliveryTools.UpdateDeliveryStatusAsync(tenantProvider.CurrentBusinessId, id, request.Status, ct);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
             }
             catch (InvalidOperationException ex)
             {
@@ -653,6 +722,48 @@ public static class DashboardEndpoints
             connection.IntegrationId = request.IntegrationId;
             connection.IntegrationKey = request.IntegrationKey;
             connection.NotificationEmail = request.NotificationEmail;
+
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(connection);
+        }).RequireAuthorization("Permission:ManageBusinessSettings");
+
+        // Real EcoCash Instant Payment sandbox integration — a genuine alternate gateway alongside
+        // Paynow above, not a replacement. Mirrors /payments/connect exactly: create-or-update,
+        // active immediately.
+        api.MapPost("/payments/connect-ecocash", async (
+            EcoCashConnectRequest request, AiBusinessPlatformDbContext db, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password) ||
+                string.IsNullOrWhiteSpace(request.MerchantCode) || string.IsNullOrWhiteSpace(request.MerchantPin) ||
+                string.IsNullOrWhiteSpace(request.MerchantNumber))
+            {
+                return Results.BadRequest("username, password, merchantCode, merchantPin, and merchantNumber are required.");
+            }
+
+            var connection = await db.EcoCashConnections
+                .FirstOrDefaultAsync(c => c.BusinessId == tenantProvider.CurrentBusinessId, ct);
+
+            if (connection is null)
+            {
+                connection = new EcoCashConnection
+                {
+                    Id = Guid.NewGuid(),
+                    BusinessId = tenantProvider.CurrentBusinessId,
+                    CreatedAt = DateTimeOffset.UtcNow
+                };
+                db.EcoCashConnections.Add(connection);
+            }
+
+            connection.Username = request.Username;
+            connection.Password = request.Password;
+            connection.MerchantCode = request.MerchantCode;
+            connection.MerchantPin = request.MerchantPin;
+            connection.MerchantNumber = request.MerchantNumber;
+            connection.MerchantName = request.MerchantName;
+            connection.SuperMerchantName = request.SuperMerchantName;
+            if (!string.IsNullOrWhiteSpace(request.CountryCode)) connection.CountryCode = request.CountryCode;
+            if (!string.IsNullOrWhiteSpace(request.TerminalId)) connection.TerminalId = request.TerminalId;
+            if (!string.IsNullOrWhiteSpace(request.Location)) connection.Location = request.Location;
 
             await db.SaveChangesAsync(ct);
             return Results.Ok(connection);

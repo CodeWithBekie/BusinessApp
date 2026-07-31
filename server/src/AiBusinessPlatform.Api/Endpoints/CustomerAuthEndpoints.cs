@@ -61,13 +61,15 @@ public static class CustomerAuthEndpoints
             var account = await db.CustomerAccounts.FirstOrDefaultAsync(a => a.Email == request.Email, ct);
             if (account is null)
             {
-                return Results.Unauthorized();
+                return Results.Json(new { message = "Invalid email or password." }, statusCode: StatusCodes.Status401Unauthorized);
             }
 
             var verification = passwordHasher.VerifyHashedPassword(account, account.PasswordHash, request.Password);
             if (verification == PasswordVerificationResult.Failed)
             {
-                return Results.Unauthorized();
+                // Deliberately the same message as the "no account" branch above — don't reveal
+                // whether the email exists at all.
+                return Results.Json(new { message = "Invalid email or password." }, statusCode: StatusCodes.Status401Unauthorized);
             }
 
             return Results.Ok(IssueToken(account, jwtOptions.Value));

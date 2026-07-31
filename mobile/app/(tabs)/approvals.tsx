@@ -2,9 +2,15 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Chip } from '@/components/ui/Chip';
 import { apiClient, PendingApproval } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
+import Colors from '@/constants/Colors';
+import { radius, semanticColors, spacing, typography } from '@/constants/theme';
 import { APPROVAL_STATUS_COLORS, APPROVAL_STATUS_FILTERS, ApprovalStatus } from '@/src/approvals/approvalStatus';
 import { formatRelativeDate } from '@/src/common/format';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
@@ -72,31 +78,19 @@ function describeDetails(
   return { title: detailsJson, parsed: null, paymentProof: null };
 }
 
-function StatusBadge({ status }: { status: ApprovalStatus }) {
-  return (
-    <View style={[styles.badge, { backgroundColor: APPROVAL_STATUS_COLORS[status] }]}>
-      <Text style={styles.badgeText}>{status}</Text>
-    </View>
-  );
-}
-
 function FilterTabs({ value, onChange }: { value: FilterValue; onChange: (value: FilterValue) => void }) {
   return (
     <View style={styles.filterRow} lightColor="transparent" darkColor="transparent">
-      {APPROVAL_STATUS_FILTERS.map((filter) => {
-        const active = filter === value;
-        return (
-          <Pressable key={filter} onPress={() => onChange(filter)} style={[styles.filterChip, active && styles.filterChipActive]}>
-            <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{filter}</Text>
-          </Pressable>
-        );
-      })}
+      {APPROVAL_STATUS_FILTERS.map((filter) => (
+        <Chip key={filter} label={filter} active={filter === value} onPress={() => onChange(filter)} />
+      ))}
     </View>
   );
 }
 
 export default function ApprovalsScreen() {
   const colorScheme = useColorScheme();
+  const tint = Colors[colorScheme].tint;
   const isOnline = useIsOnline();
   const canDecideApprovals = useHasPermission('DecideApprovals');
   const [filter, setFilter] = useState<FilterValue>('Pending');
@@ -177,10 +171,10 @@ export default function ApprovalsScreen() {
         visibleItems.map((item) => {
           const { title, paymentProof } = describeDetails(item.actionType, item.detailsJson);
           return (
-            <View key={item.id} style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+            <Card key={item.id} style={styles.card}>
               <View style={styles.cardTopRow} lightColor="transparent" darkColor="transparent">
                 <Text style={styles.cardTitle}>{title}</Text>
-                <StatusBadge status={item.status} />
+                <Badge label={item.status} color={APPROVAL_STATUS_COLORS[item.status]} />
               </View>
               <Text style={[styles.cardMeta, colorScheme === 'dark' ? styles.metaDark : styles.metaLight]}>
                 Requested {formatRelativeDate(item.requestedAt)}
@@ -189,7 +183,7 @@ export default function ApprovalsScreen() {
               {paymentProof && (
                 <>
                   <Pressable style={styles.inlineEditButton} onPress={() => toggleProof(item, paymentProof.PaymentId)}>
-                    <Text style={styles.inlineEditButtonText}>
+                    <Text style={[styles.inlineEditButtonText, { color: tint }]}>
                       {expandedProofItemId === item.id ? 'Hide proof' : 'View proof'}
                     </Text>
                   </Pressable>
@@ -204,25 +198,25 @@ export default function ApprovalsScreen() {
               {item.status === 'Pending' && canDecideApprovals && (
                 <>
                   <View style={styles.actions} lightColor="transparent" darkColor="transparent">
-                    <Pressable
-                      style={[styles.button, styles.approveButton, !isOnline && styles.buttonDisabled]}
+                    <Button
+                      label={pendingActionId === item.id ? '…' : 'Approve'}
+                      variant="success"
+                      style={styles.actionButton}
                       disabled={pendingActionId === item.id || !isOnline}
                       onPress={() => setConfirmTarget({ item, decision: 'approve' })}
-                    >
-                      <Text style={styles.buttonText}>{pendingActionId === item.id ? '…' : 'Approve'}</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.button, styles.rejectButton, !isOnline && styles.buttonDisabled]}
+                    />
+                    <Button
+                      label={pendingActionId === item.id ? '…' : 'Reject'}
+                      variant="destructive"
+                      style={styles.actionButton}
                       disabled={pendingActionId === item.id || !isOnline}
                       onPress={() => setConfirmTarget({ item, decision: 'reject' })}
-                    >
-                      <Text style={styles.buttonText}>{pendingActionId === item.id ? '…' : 'Reject'}</Text>
-                    </Pressable>
+                    />
                   </View>
                   {!isOnline && <Text style={styles.offlineNotice}>You're offline — connect to decide.</Text>}
                 </>
               )}
-            </View>
+            </Card>
           );
         })}
 
@@ -241,15 +235,12 @@ export default function ApprovalsScreen() {
               <Pressable style={[styles.modalButton, styles.modalCancelButton]} onPress={() => setConfirmTarget(null)}>
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </Pressable>
-              <Pressable
-                style={[
-                  styles.modalButton,
-                  confirmTarget?.decision === 'approve' ? styles.approveButton : styles.rejectButton,
-                ]}
+              <Button
+                label={confirmTarget?.decision === 'approve' ? 'Approve' : 'Reject'}
+                variant={confirmTarget?.decision === 'approve' ? 'success' : 'destructive'}
+                style={styles.modalButton}
                 onPress={performDecision}
-              >
-                <Text style={styles.buttonText}>{confirmTarget?.decision === 'approve' ? 'Approve' : 'Reject'}</Text>
-              </Pressable>
+              />
             </View>
           </View>
         </View>
@@ -261,41 +252,31 @@ export default function ApprovalsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingTop: 24, paddingHorizontal: 16, paddingBottom: 32 },
-  title: { fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  filterChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#ccc' },
-  filterChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
-  filterChipText: { fontSize: 13, fontWeight: '500', opacity: 0.7 },
-  filterChipTextActive: { color: '#fff', opacity: 1 },
+  title: { ...typography.title, marginBottom: spacing.md },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   separator: { marginTop: 12, marginBottom: 12, height: 1, width: '100%' },
   loading: { marginTop: 24 },
   empty: { opacity: 0.6, marginTop: 8 },
-  error: { color: '#c0392b', marginBottom: 12 },
+  error: { color: semanticColors.danger, marginBottom: 12 },
   cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
-  card: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 14, marginBottom: 12 },
-  cardTopRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
-  cardTitle: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
-  cardMeta: { fontSize: 12, marginTop: 6 },
+  card: { marginBottom: spacing.md },
+  cardTopRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.sm },
+  cardTitle: { ...typography.bodyStrong, flexShrink: 1 },
+  cardMeta: { ...typography.meta, marginTop: spacing.xs + 2 },
   metaLight: { color: '#666' },
   metaDark: { color: '#aaa' },
-  actions: { flexDirection: 'row', gap: 12, marginTop: 12 },
-  button: { flex: 1, paddingVertical: 10, borderRadius: 6, alignItems: 'center' },
-  buttonDisabled: { opacity: 0.6 },
-  approveButton: { backgroundColor: '#2e7d32' },
-  rejectButton: { backgroundColor: '#c0392b' },
-  buttonText: { color: '#fff', fontWeight: '600' },
-  inlineEditButton: { marginTop: 10 },
-  inlineEditButtonText: { color: '#007aff', fontWeight: '600', fontSize: 13 },
-  proofImage: { width: '100%', height: 240, marginTop: 10, borderRadius: 8, backgroundColor: '#eee' },
-  offlineNotice: { color: '#c0392b', fontSize: 12, marginTop: 8 },
-  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  actions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
+  actionButton: { flex: 1, paddingVertical: 10 },
+  inlineEditButton: { marginTop: spacing.sm + 2 },
+  inlineEditButtonText: { fontWeight: '600', fontSize: 13 },
+  proofImage: { width: '100%', height: 240, marginTop: spacing.sm + 2, borderRadius: radius.sm, backgroundColor: '#eee' },
+  offlineNotice: { color: semanticColors.danger, fontSize: 12, marginTop: spacing.sm },
   modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   modalCard: { width: '100%', maxWidth: 360, borderRadius: 12, padding: 20 },
   modalTitle: { fontSize: 17, fontWeight: '700', marginBottom: 8 },
   modalBody: { fontSize: 14, marginBottom: 20 },
   modalActions: { flexDirection: 'row', gap: 12 },
-  modalButton: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  modalCancelButton: { borderWidth: 1, borderColor: '#ccc' },
+  modalButton: { flex: 1 },
+  modalCancelButton: { paddingVertical: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ccc' },
   modalCancelText: { fontWeight: '600' },
 });

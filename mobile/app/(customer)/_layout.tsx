@@ -7,7 +7,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 import { OfflineBanner } from '@/src/offline/OfflineBanner';
 
-type TabIconName = 'storefront' | 'list.bullet' | 'person.circle';
+type TabIconName = 'storefront' | 'list.bullet' | 'person.circle' | 'sparkles';
 
 function TabIcon({ name, color }: { name: TabIconName; color: ColorValue }) {
   return <SymbolView name={{ ios: name, android: 'code', web: 'code' }} tintColor={color} size={26} />;
@@ -26,6 +26,7 @@ export default function CustomerTabLayout() {
         }}>
         <Tabs.Screen name="index" options={{ title: 'Browse', tabBarIcon: ({ color }) => <TabIcon name="storefront" color={color} /> }} />
         <Tabs.Screen name="orders" options={{ title: 'My Orders', tabBarIcon: ({ color }) => <TabIcon name="list.bullet" color={color} /> }} />
+        <Tabs.Screen name="assistant" options={{ title: 'Assistant', tabBarIcon: ({ color }) => <TabIcon name="sparkles" color={color} /> }} />
         <Tabs.Screen name="account" options={{ title: 'Account', tabBarIcon: ({ color }) => <TabIcon name="person.circle" color={color} /> }} />
       </Tabs>
     </View>

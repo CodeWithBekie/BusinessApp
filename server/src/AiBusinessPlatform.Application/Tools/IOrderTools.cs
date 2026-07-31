@@ -38,10 +38,13 @@ public record OrderSummary(
 
 public record OrderPaymentSummary(PaymentProvider Provider, string ProviderReference, PaymentStatus Status, decimal Amount, DateTimeOffset? ConfirmedAt, decimal? AmountTendered, decimal? ChangeDue);
 
+// Null when no Delivery row exists yet for this order (the common case — most orders never get one).
+public record OrderDeliverySummary(DeliveryStatus Status, string? DriverName);
+
 public record OrderDetailSummary(
     Guid Id, Guid CustomerId, string CustomerWhatsAppNumber, string? CustomerName,
     OrderStatus Status, decimal TotalAmount, decimal VatAmount, int? InvoiceNumber, string Currency,
-    IReadOnlyList<InvoiceLineItem> Items, OrderPaymentSummary? Payment,
+    IReadOnlyList<InvoiceLineItem> Items, OrderPaymentSummary? Payment, OrderDeliverySummary? Delivery,
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 
 public interface IOrderTools
@@ -131,4 +134,12 @@ public interface IOrderTools
     // reference or status; correcting those isn't supported. Fulfilled/Cancelled orders are locked.
     [Description("Corrects the payment method on an order's already-confirmed payment — e.g. it was logged as Cash but was actually a Bank transfer. provider must be \"Cash\", \"EcoCash\", \"Bank\", or \"Other\". Fails if the order has no confirmed payment yet, or is Fulfilled/Cancelled.")]
     Task<OrderDetailSummary> UpdatePaymentProviderAsync(Guid businessId, Guid orderId, PaymentProvider provider, CancellationToken cancellationToken = default);
+
+    // New ground — lets the business owner explicitly (re-)charge a customer's phone number via
+    // EcoCash for an Invoiced order, e.g. when the invoice-time auto-attempt used a synthetic or
+    // incorrect number, or for a WhatsApp order where the owner wants to confirm the number before
+    // charging. Mirrors MarketplaceTools.PayWithEcoCashAsync's own body, just business-tenant-scoped
+    // instead of customer-account-scoped — no ownership resolution needed, the caller IS the business.
+    [Description("Initiates an EcoCash payment charge to the given phone number for one of this business's own Invoiced (unpaid) orders — use when the customer wants to pay now and you have their EcoCash number, or to retry after the automatic attempt at invoicing used the wrong number. Fails if the business has no EcoCash or Paynow gateway connected yet, or if the order isn't Invoiced.")]
+    Task<OrderDetailSummary> InitiateEcoCashPaymentAsync(Guid businessId, Guid orderId, string customerPhoneNumber, CancellationToken cancellationToken = default);
 }

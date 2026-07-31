@@ -13,7 +13,9 @@ public class PaymentTools(
     AiBusinessPlatformDbContext dbContext,
     ICurrentTenantProvider tenantProvider,
     IPaynowClient paynowClient,
-    IOptions<PaynowOptions> paynowOptions) : IPaymentTools
+    IOptions<PaynowOptions> paynowOptions,
+    IEcoCashClient ecoCashClient,
+    IOptions<EcoCashOptions> ecoCashOptions) : IPaymentTools
 {
     public async Task<PaymentRequestResult> CreatePaymentRequestAsync(
         Guid businessId, Guid orderId, decimal amount, string currency, string customerNumber, CancellationToken cancellationToken = default)
@@ -24,6 +26,30 @@ public class PaymentTools(
         }
 
         var reference = $"INV-{orderId:N}"[..12].ToUpperInvariant();
+
+        // EcoCash is checked first — it's the real, direct gateway; Paynow's own "ecocash" method
+        // stays available as a fallback for businesses that connected it before this existed.
+        var ecoCashConnection = await dbContext.EcoCashConnections.FirstOrDefaultAsync(c => c.BusinessId == businessId, cancellationToken);
+        if (ecoCashConnection is not null)
+        {
+            var notifyUrl = $"{ecoCashOptions.Value.PublicBaseUrl}/webhooks/payments/ecocash";
+            var charge = await ecoCashClient.ChargeAsync(
+                ecoCashConnection.Username, ecoCashConnection.Password, ecoCashConnection.MerchantCode,
+                ecoCashConnection.MerchantPin, ecoCashConnection.MerchantNumber, ecoCashConnection.MerchantName,
+                ecoCashConnection.SuperMerchantName, ecoCashConnection.CountryCode, ecoCashConnection.TerminalId,
+                ecoCashConnection.Location, clientCorrelator: reference, referenceCode: reference, amount, currency,
+                endUserId: customerNumber, notifyUrl, cancellationToken);
+
+            if (!charge.Success)
+            {
+                throw new InvalidOperationException($"EcoCash rejected the payment request: {charge.RawResponse}");
+            }
+
+            // No PollUrl — unlike Paynow's, EcoCash's status-check endpoint isn't a URL returned
+            // from the charge call, it's built from endUserId + clientCorrelator (see
+            // GetPaymentStatusAsync's own EcoCash branch, keyed off Payment.EcoCashEndUserId instead).
+            return new PaymentRequestResult(reference, charge.Status, PollUrl: null);
+        }
 
         var connection = await dbContext.PaynowConnections.FirstOrDefaultAsync(c => c.BusinessId == businessId, cancellationToken);
         if (connection is null)
@@ -59,6 +85,20 @@ public class PaymentTools(
     {
         var payment = await dbContext.Payments.FirstOrDefaultAsync(p => p.ProviderReference == paymentReference, cancellationToken)
             ?? throw new InvalidOperationException($"No payment found with reference {paymentReference}.");
+
+        // EcoCash has a real status-check endpoint (GET /{endUserId}/transactions/amount/{clientCorrelator},
+        // confirmed from EcoCash's own reference client code) — check this before the PollUrl-based
+        // Paynow branch below, since an EcoCash payment never has a PollUrl.
+        if (payment.PollUrl is null && payment.EcoCashEndUserId is not null)
+        {
+            var ecoCashConnection = await dbContext.EcoCashConnections.FirstOrDefaultAsync(c => c.BusinessId == payment.BusinessId, cancellationToken)
+                ?? throw new InvalidOperationException($"Payment {payment.Id} has an EcoCash end user id but its business has no EcoCashConnection.");
+
+            var ecoCashStatus = await ecoCashClient.CheckStatusAsync(
+                ecoCashConnection.Username, ecoCashConnection.Password, payment.EcoCashEndUserId, paymentReference, cancellationToken);
+
+            return new PaymentStatusResult(paymentReference, ecoCashStatus.Status ?? payment.Status.ToString());
+        }
 
         if (payment.PollUrl is null)
         {

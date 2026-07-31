@@ -13,6 +13,10 @@ public record AssistantChatRequest(IReadOnlyList<AssistantChatMessage> Messages,
 
 public record AssistantResourceSummary(string Uri, string? Name, string? Title);
 
+// A resolved MCP prompt — Title is the chip's display label, Message is the actual text sent when
+// tapped (see AssistantEndpoints.cs's GET /api/assistant/prompts remarks for why these can differ).
+public record AssistantPromptResponse(string Name, string Title, string Message);
+
 // The mobile answer to a mid-conversation elicitation form, submitted via a separate HTTP request
 // while the original /api/assistant/chat request is still open awaiting it (see ElicitationRegistry).
 public record ElicitationAnswerRequest(string Action, IReadOnlyDictionary<string, JsonElement>? Content);

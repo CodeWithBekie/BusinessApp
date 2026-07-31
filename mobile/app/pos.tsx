@@ -2,10 +2,14 @@ import { Stack, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Chip } from '@/components/ui/Chip';
 import { apiClient, CatalogItem, Customer, PosPaymentMethod } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { formatMoney } from '@/src/catalog/catalogItemType';
+import { semanticColors, spacing, typography } from '@/constants/theme';
 import { downloadAndShareDocument } from '@/src/documents/downloadAndShare';
 import { useIsOnline } from '@/src/offline/networkStatus';
 
@@ -47,7 +51,7 @@ function ItemPickerRow({ item, onAdd }: { item: CatalogItem; onAdd: () => void }
       disabled={outOfStock}
       style={({ pressed }) => [styles.pickerRow, pressed && styles.pickerRowPressed, outOfStock && styles.pickerRowDisabled]}
     >
-      <View style={styles.pickerRowInner} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+      <Card style={styles.pickerRowInner}>
         <View style={styles.pickerRowText} lightColor="transparent" darkColor="transparent">
           <Text style={styles.pickerName} numberOfLines={1}>
             {item.name}
@@ -58,7 +62,7 @@ function ItemPickerRow({ item, onAdd }: { item: CatalogItem; onAdd: () => void }
           </Text>
         </View>
         <Text style={styles.pickerAdd}>{outOfStock ? 'Out of stock' : '+ Add'}</Text>
-      </View>
+      </Card>
     </Pressable>
   );
 }
@@ -351,45 +355,37 @@ export default function PosScreen() {
           )}
           {receiptError && <Text style={styles.error}>{receiptError}</Text>}
           {result.kind === 'sale' && (
-            <Pressable style={[styles.receiptButton, downloadingReceipt && styles.buttonDisabled]} disabled={downloadingReceipt} onPress={downloadReceipt}>
-              <Text style={styles.receiptButtonText}>{downloadingReceipt ? 'Preparing…' : 'Download receipt'}</Text>
-            </Pressable>
+            <Button
+              label={downloadingReceipt ? 'Preparing…' : 'Download receipt'}
+              variant="secondary"
+              style={styles.receiptButton}
+              disabled={downloadingReceipt}
+              onPress={downloadReceipt}
+            />
           )}
-          <Pressable style={styles.successDismiss} onPress={() => router.back()}>
-            <Text style={styles.successDismissText}>Done</Text>
-          </Pressable>
+          <Button label="Done" variant="success" style={styles.successDismiss} onPress={() => router.back()} />
         </View>
       )}
 
       {!result && (
         <>
           <View style={styles.saleTypeRow} lightColor="transparent" darkColor="transparent">
-            {SALE_TYPES.map((type) => {
-              const active = type.value === saleType;
-              return (
-                <Pressable key={type.value} onPress={() => setSaleType(type.value)} style={[styles.saleTypeChip, active && styles.saleTypeChipActive]}>
-                  <Text style={[styles.saleTypeChipText, active && styles.saleTypeChipTextActive]}>{type.label}</Text>
-                </Pressable>
-              );
-            })}
+            {SALE_TYPES.map((type) => (
+              <Chip key={type.value} label={type.label} active={type.value === saleType} onPress={() => setSaleType(type.value)} style={styles.saleTypeChip} />
+            ))}
           </View>
 
           {currencies.length > 1 && (
             <View style={styles.currencyRow} lightColor="transparent" darkColor="transparent">
-              {currencies.map((cur) => {
-                const active = cur === selectedCurrency;
-                const locked = cartLines.length > 0 && !active;
-                return (
-                  <Pressable
-                    key={cur}
-                    disabled={locked}
-                    onPress={() => setSelectedCurrency(cur)}
-                    style={[styles.currencyChip, active && styles.currencyChipActive, locked && styles.currencyChipDisabled]}
-                  >
-                    <Text style={[styles.currencyChipText, active && styles.currencyChipTextActive]}>{cur}</Text>
-                  </Pressable>
-                );
-              })}
+              {currencies.map((cur) => (
+                <Chip
+                  key={cur}
+                  label={cur}
+                  active={cur === selectedCurrency}
+                  disabled={cartLines.length > 0 && cur !== selectedCurrency}
+                  onPress={() => setSelectedCurrency(cur)}
+                />
+              ))}
             </View>
           )}
 
@@ -448,14 +444,9 @@ export default function PosScreen() {
               <>
                 <Text style={styles.label}>Payment method</Text>
                 <View style={styles.paymentRow} lightColor="transparent" darkColor="transparent">
-                  {PAYMENT_METHODS.map((method) => {
-                    const active = method === paymentMethod;
-                    return (
-                      <Pressable key={method} onPress={() => setPaymentMethod(method)} style={[styles.paymentChip, active && styles.paymentChipActive]}>
-                        <Text style={[styles.paymentChipText, active && styles.paymentChipTextActive]}>{method}</Text>
-                      </Pressable>
-                    );
-                  })}
+                  {PAYMENT_METHODS.map((method) => (
+                    <Chip key={method} label={method} active={method === paymentMethod} onPress={() => setPaymentMethod(method)} />
+                  ))}
                 </View>
               </>
             )}
@@ -482,7 +473,7 @@ export default function PosScreen() {
 
             <Text style={styles.label}>Customer</Text>
             {selectedCustomer ? (
-              <View style={styles.selectedCustomerCard} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+              <Card style={styles.selectedCustomerCard}>
                 <View style={styles.selectedCustomerText} lightColor="transparent" darkColor="transparent">
                   <Text style={styles.selectedCustomerName} numberOfLines={1}>
                     {selectedCustomer.name ?? 'Unnamed customer'}
@@ -491,10 +482,8 @@ export default function PosScreen() {
                     {selectedCustomer.whatsAppNumber} · {selectedCustomer.orderCount} previous sale{selectedCustomer.orderCount === 1 ? '' : 's'}
                   </Text>
                 </View>
-                <Pressable style={styles.changeCustomerButton} onPress={clearCustomer}>
-                  <Text style={styles.changeCustomerButtonText}>Change</Text>
-                </Pressable>
-              </View>
+                <Button label="Change" style={styles.changeCustomerButton} onPress={clearCustomer} />
+              </Card>
             ) : (
               <>
                 <TextInput
@@ -530,15 +519,12 @@ export default function PosScreen() {
               <Text style={styles.error}>You're offline — connect to complete this {saleType === 'quotation' ? 'quotation' : 'sale'}.</Text>
             )}
 
-            <Pressable
-              style={[styles.button, (saving || cartLines.length === 0 || !isOnline) && styles.buttonDisabled]}
+            <Button
+              label={saving ? 'Saving…' : saleType === 'quotation' ? 'Create Quotation' : 'Complete sale'}
+              style={styles.completeButton}
               disabled={saving || cartLines.length === 0 || !isOnline}
               onPress={completeSale}
-            >
-              <Text style={styles.buttonText}>
-                {saving ? 'Saving…' : saleType === 'quotation' ? 'Create Quotation' : 'Complete sale'}
-              </Text>
-            </Pressable>
+            />
           </ScrollView>
         </>
       )}
@@ -549,43 +535,32 @@ export default function PosScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 16 },
   loading: { marginTop: 24 },
-  error: { color: '#c0392b', marginTop: 8, marginBottom: 8 },
+  error: { color: semanticColors.danger, marginTop: 8, marginBottom: 8 },
   empty: { opacity: 0.6, marginTop: 8, marginBottom: 8 },
-  saleTypeRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  saleTypeChip: { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ccc', alignItems: 'center' },
-  saleTypeChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
-  saleTypeChipText: { fontSize: 13, fontWeight: '600', opacity: 0.7 },
-  saleTypeChipTextActive: { color: '#fff', opacity: 1 },
-  currencyRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  currencyChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#ccc' },
-  currencyChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
-  currencyChipDisabled: { opacity: 0.4 },
-  currencyChipText: { fontSize: 13, fontWeight: '600', opacity: 0.7 },
-  currencyChipTextActive: { color: '#fff', opacity: 1 },
-  tenderedHint: { fontSize: 13, fontWeight: '600', color: '#2e7d32', marginTop: 6 },
-  tenderedInsufficient: { color: '#c0392b' },
-  label: { fontSize: 13, fontWeight: '600', opacity: 0.7, marginTop: 16, marginBottom: 6 },
-  sectionTitle: { fontSize: 15, fontWeight: '700', marginBottom: 8 },
+  saleTypeRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  saleTypeChip: { flex: 1, alignItems: 'center' },
+  currencyRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  tenderedHint: { fontSize: 13, fontWeight: '600', color: semanticColors.success, marginTop: 6 },
+  tenderedInsufficient: { color: semanticColors.danger },
+  label: { fontSize: 13, fontWeight: '600', opacity: 0.7, marginTop: spacing.lg, marginBottom: spacing.xs + 2 },
+  sectionTitle: { ...typography.bodyStrong, fontSize: 15, marginBottom: spacing.sm },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',
-    borderRadius: 6,
+    borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   inputLight: { color: '#000' },
   inputDark: { color: '#fff' },
   pickerList: { maxHeight: 220, marginTop: 10 },
-  pickerRow: { marginBottom: 8, borderRadius: 8 },
+  pickerRow: { marginBottom: spacing.sm },
   pickerRowPressed: { opacity: 0.7 },
   pickerRowDisabled: { opacity: 0.5 },
   pickerRowInner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
     padding: 10,
   },
   pickerRowText: { flexShrink: 1, marginRight: 8 },
@@ -603,18 +578,14 @@ const styles = StyleSheet.create({
   stepperButtonText: { fontSize: 16, fontWeight: '700' },
   stepperValue: { fontSize: 14, fontWeight: '600', minWidth: 18, textAlign: 'center' },
   removeButton: { paddingHorizontal: 4 },
-  removeButtonText: { fontSize: 12, color: '#c0392b', fontWeight: '600' },
+  removeButtonText: { fontSize: 12, color: semanticColors.danger, fontWeight: '600' },
   subtotalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
   subtotalLabel: { fontSize: 13, opacity: 0.7 },
   subtotalValue: { fontSize: 13, opacity: 0.7 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#ccc' },
   totalLabel: { fontSize: 15, fontWeight: '700' },
   totalValue: { fontSize: 17, fontWeight: '800' },
-  paymentRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  paymentChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#ccc' },
-  paymentChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
-  paymentChipText: { fontSize: 13, fontWeight: '500', opacity: 0.7 },
-  paymentChipTextActive: { color: '#fff', opacity: 1 },
+  paymentRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
   hint: { fontSize: 12, opacity: 0.5, marginTop: 10, marginBottom: 6 },
   phoneInput: { marginTop: 8 },
   customerSearchLoading: { marginTop: 8 },
@@ -626,25 +597,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    padding: 12,
     gap: 8,
   },
   selectedCustomerText: { flexShrink: 1 },
   selectedCustomerName: { fontSize: 14, fontWeight: '700' },
   selectedCustomerMeta: { fontSize: 12, opacity: 0.6, marginTop: 2 },
-  changeCustomerButton: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: '#007aff' },
-  changeCustomerButtonText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  button: { backgroundColor: '#007aff', paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 24, marginBottom: 8 },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  changeCustomerButton: { paddingHorizontal: 12, paddingVertical: 6 },
+  completeButton: { marginTop: spacing.xl, marginBottom: spacing.sm },
   successBanner: { borderRadius: 10, padding: 16, marginTop: 16 },
   successTitle: { fontSize: 16, fontWeight: '700' },
   successMeta: { fontSize: 13, opacity: 0.7, marginTop: 4 },
-  successDismiss: { backgroundColor: '#2e7d32', paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginTop: 16 },
-  successDismissText: { color: '#fff', fontWeight: '600' },
-  receiptButton: { borderWidth: 1, borderColor: '#2e7d32', paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginTop: 12 },
-  receiptButtonText: { color: '#2e7d32', fontWeight: '600' },
+  successDismiss: { marginTop: 16 },
+  receiptButton: { marginTop: 12 },
 });

@@ -11,3 +11,9 @@ public record QuotationRequest(IReadOnlyList<PosSaleLineItemRequest> Items, Guid
 public record RecordPaymentRequest(PaymentProvider Provider, string Reference, decimal Amount);
 
 public record UpdatePaymentProviderRequest(PaymentProvider Provider);
+
+public record PayOrderWithEcoCashRequest(string PhoneNumber);
+
+public record AssignDriverRequest(string? DriverName);
+
+public record UpdateDeliveryStatusRequest(DeliveryStatus Status);

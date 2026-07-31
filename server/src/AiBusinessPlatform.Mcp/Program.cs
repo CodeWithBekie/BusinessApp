@@ -8,6 +8,7 @@ using AiBusinessPlatform.Infrastructure.Ledger;
 using AiBusinessPlatform.Infrastructure.Payments;
 using AiBusinessPlatform.Infrastructure.Tools;
 using AiBusinessPlatform.Infrastructure.WhatsApp;
+using AiBusinessPlatform.Mcp.Prompts;
 using AiBusinessPlatform.Mcp.Resources;
 using AiBusinessPlatform.Mcp.Tools;
 using Microsoft.EntityFrameworkCore;
@@ -18,6 +19,18 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHttpContextAccessor();
 
+// Dev-only: lets a browser-based MCP client (e.g. the MCP Inspector web UI) call this server
+// directly. The Api project's own Assistant endpoints never need this — that's a server-to-server
+// McpClient call, not a browser fetch — so this is scoped to Development and not something a
+// deployed instance of this host ever enables.
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
+        policy.SetIsOriginAllowed(origin => new Uri(origin).IsLoopback)
+            .AllowAnyHeader()
+            .AllowAnyMethod()));
+}
+
 builder.Services.AddDbContext<AiBusinessPlatformDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default"), o => o.UseVector()));
 
@@ -27,9 +40,16 @@ builder.Services.AddDbContext<AiBusinessPlatformDbContext>(options =>
 builder.Services.AddPlatformJwtAuthentication(builder.Configuration);
 builder.Services.AddScoped<HttpBusinessIdTenantProvider>();
 builder.Services.AddScoped<ICurrentTenantProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
+builder.Services.AddScoped<ICurrentTenantSetter>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
 builder.Services.AddScoped<ICurrentUserProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
 builder.Services.AddScoped<ICurrentUserRoleProvider>(sp => sp.GetRequiredService<HttpBusinessIdTenantProvider>());
 builder.Services.AddScoped<IPermissionChecker, PermissionChecker>();
+
+// Section: customer dashboard/assistant redesign — the customer JWT's own identity, independent of
+// tenant context (returns null rather than throwing when absent, e.g. a business caller). Needed by
+// MarketplaceMcpTools; not previously registered in this host since only the Api project's REST
+// marketplace endpoints used it until now.
+builder.Services.AddScoped<ICurrentCustomerProvider, HttpCustomerAccountProvider>();
 
 builder.Services.AddScoped<IHealthTool, HealthTool>();
 builder.Services.AddScoped<ICatalogTools, CatalogTools>();
@@ -41,8 +61,15 @@ builder.Services.AddScoped<IInsightsTools, InsightsTools>();
 // Paynow call path (same accepted shape as OrchestratorHarness/Program.cs).
 builder.Services.Configure<PaynowOptions>(builder.Configuration.GetSection(PaynowOptions.SectionName));
 builder.Services.AddHttpClient<IPaynowClient, PaynowClient>();
+
+// Real EcoCash Instant Payment sandbox calls — a genuine alternate gateway alongside Paynow above,
+// not a replacement (PaymentTools.CreatePaymentRequestAsync checks this connection first). No
+// AddHttpClient here — EcoCashClient shells out to curl instead (see its own remarks for why).
+builder.Services.Configure<EcoCashOptions>(builder.Configuration.GetSection(EcoCashOptions.SectionName));
+builder.Services.AddScoped<IEcoCashClient, EcoCashClient>();
 builder.Services.AddScoped<IPaymentTools, PaymentTools>();
 builder.Services.AddScoped<IOrderTools, OrderTools>();
+builder.Services.AddScoped<IDeliveryTools, DeliveryTools>();
 
 // Section 10.6 — same embedding model RagTools needs for search_business_documents.
 builder.Services.Configure<LmStudioOptions>(builder.Configuration.GetSection(LmStudioOptions.SectionName));
@@ -67,6 +94,11 @@ builder.Services.AddScoped<IExpenseTools, ExpenseTools>();
 builder.Services.AddScoped<IAccountingTools, AccountingTools>();
 builder.Services.AddScoped<ILedgerPostingService, LedgerPostingService>();
 
+// Section: customer dashboard/assistant redesign — MarketplaceMcpTools wraps this same
+// implementation the REST marketplace endpoints already call (Section 10.7's "one function,
+// multiple entry points" convention, extended to a second host project here).
+builder.Services.AddScoped<IMarketplaceTools, MarketplaceTools>();
+
 // Section 10.7 — the same C# functions the in-app orchestrator/dashboard/Assistant call, exposed
 // as MCP tools. The Assistant chat endpoint (Api project) is itself an MCP client of this server —
 // there is exactly one tool surface in the whole system, not a parallel copy.
@@ -85,9 +117,18 @@ builder.Services
     .WithTools<CustomerMessagingMcpTools>()
     .WithTools<AccountingMcpTools>()
     .WithTools<ExpenseMcpTools>()
-    .WithResources<BusinessResources>();
+    .WithTools<MarketplaceMcpTools>()
+    .WithTools<DeliveryMcpTools>()
+    .WithResources<BusinessResources>()
+    .WithPrompts<OwnerSuggestionPrompts>()
+    .WithPrompts<CustomerSuggestionPrompts>();
 
 var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseCors();
+}
 
 app.UseAuthentication();
 app.UseAuthorization();

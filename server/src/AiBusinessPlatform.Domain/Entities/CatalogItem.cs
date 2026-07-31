@@ -11,6 +11,7 @@ public class CatalogItem : ITenantScoped
     public decimal? Cost { get; set; } // most recent purchase-order unit cost — null until ever purchased
     public string Currency { get; set; } = "USD";
     public int? StockQuantity { get; set; }
+    public int LowStockThreshold { get; set; } = 5; // only meaningful when ItemType is Stock
     public string Unit { get; set; } = "each";
     public bool Active { get; set; } = true;
     public byte[]? ImageData { get; set; }

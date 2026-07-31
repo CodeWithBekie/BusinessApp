@@ -30,7 +30,7 @@ public class MarketplaceTools(
             throw new InvalidOperationException("businessId does not match the current tenant context.");
         }
 
-        return await catalogTools.ListCatalogItemsAsync(businessId, activeOnly: true, cancellationToken);
+        return await catalogTools.ListCatalogItemsAsync(businessId, activeOnly: true, lowStockOnly: null, cancellationToken);
     }
 
     public async Task<MarketplaceOrderResult> PlaceOrderAsync(
@@ -111,7 +111,7 @@ public class MarketplaceTools(
         return new MarketplaceOrderDetail(
             detail.Id, order.BusinessId, businessName, detail.Status,
             detail.TotalAmount, detail.VatAmount, detail.InvoiceNumber, detail.Currency,
-            detail.Items, detail.Payment,
+            detail.Items, detail.Payment, detail.Delivery,
             CanCancelDirectly: detail.Status is OrderStatus.Quoted or OrderStatus.Invoiced,
             CanRequestCancellation: detail.Status == OrderStatus.Paid,
             IsPaynowConnected: isPaynowConnected,
@@ -143,8 +143,12 @@ public class MarketplaceTools(
         var payment = await dbContext.Payments.FirstOrDefaultAsync(p => p.OrderId == order.Id && p.Status == PaymentStatus.Pending, cancellationToken)
             ?? throw new InvalidOperationException($"Order {orderId} has no pending payment to pay.");
 
-        var isPaynowConnected = await dbContext.PaynowConnections.AnyAsync(c => c.BusinessId == order.BusinessId, cancellationToken);
-        if (!isPaynowConnected)
+        // EcoCash (direct) is preferred and checked first by PaymentTools.CreatePaymentRequestAsync,
+        // but Paynow's own "ecocash" method remains a valid fallback gateway — either connection
+        // makes this action available.
+        var hasGateway = await dbContext.EcoCashConnections.AnyAsync(c => c.BusinessId == order.BusinessId, cancellationToken)
+            || await dbContext.PaynowConnections.AnyAsync(c => c.BusinessId == order.BusinessId, cancellationToken);
+        if (!hasGateway)
         {
             throw new InvalidOperationException("EcoCash isn't available for this business yet — upload proof of payment instead.");
         }
@@ -155,6 +159,7 @@ public class MarketplaceTools(
         payment.Provider = PaymentProvider.EcoCash;
         payment.ProviderReference = paymentRequest.PaymentReference;
         payment.PollUrl = paymentRequest.PollUrl;
+        payment.EcoCashEndUserId = ecocashPhoneNumber;
 
         await dbContext.SaveChangesAsync(cancellationToken);
 

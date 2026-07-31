@@ -250,6 +250,49 @@ public class OrderTools(
         return await GetOrderAsync(businessId, order.Id, cancellationToken);
     }
 
+    public async Task<OrderDetailSummary> InitiateEcoCashPaymentAsync(
+        Guid businessId, Guid orderId, string customerPhoneNumber, CancellationToken cancellationToken = default)
+    {
+        if (businessId != tenantProvider.CurrentBusinessId)
+        {
+            throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+        if (string.IsNullOrWhiteSpace(customerPhoneNumber))
+        {
+            throw new ArgumentException("customerPhoneNumber is required.", nameof(customerPhoneNumber));
+        }
+
+        var order = await dbContext.Orders.FirstOrDefaultAsync(o => o.Id == orderId, cancellationToken)
+            ?? throw new InvalidOperationException($"Order {orderId} not found.");
+
+        if (order.Status != OrderStatus.Invoiced)
+        {
+            throw new InvalidOperationException($"Order {orderId} is {order.Status} — EcoCash payment can only be initiated for an unpaid, invoiced order.");
+        }
+
+        var payment = await dbContext.Payments.FirstOrDefaultAsync(p => p.OrderId == order.Id && p.Status == PaymentStatus.Pending, cancellationToken)
+            ?? throw new InvalidOperationException($"Order {orderId} has no pending payment to pay.");
+
+        var hasGateway = await dbContext.EcoCashConnections.AnyAsync(c => c.BusinessId == businessId, cancellationToken)
+            || await dbContext.PaynowConnections.AnyAsync(c => c.BusinessId == businessId, cancellationToken);
+        if (!hasGateway)
+        {
+            throw new InvalidOperationException("EcoCash isn't available for this business yet — connect Paynow or EcoCash first.");
+        }
+
+        var paymentRequest = await paymentTools.CreatePaymentRequestAsync(
+            businessId, order.Id, order.TotalAmount, order.Currency, customerPhoneNumber.Trim(), cancellationToken);
+
+        payment.Provider = PaymentProvider.EcoCash;
+        payment.ProviderReference = paymentRequest.PaymentReference;
+        payment.PollUrl = paymentRequest.PollUrl;
+        payment.EcoCashEndUserId = customerPhoneNumber.Trim();
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return await GetOrderAsync(businessId, order.Id, cancellationToken);
+    }
+
     public async Task<OrderDetailSummary> UpdatePaymentProviderAsync(
         Guid businessId, Guid orderId, PaymentProvider provider, CancellationToken cancellationToken = default)
     {
@@ -638,11 +681,13 @@ public class OrderTools(
             .ToList();
 
         var payment = await dbContext.Payments.AsNoTracking().FirstOrDefaultAsync(p => p.OrderId == order.Id, cancellationToken);
+        var delivery = await dbContext.Deliveries.AsNoTracking().FirstOrDefaultAsync(d => d.OrderId == order.Id, cancellationToken);
 
         return new OrderDetailSummary(
             order.Id, order.CustomerId, customer?.WhatsAppNumber ?? "", customer?.Name,
             order.Status, order.TotalAmount, order.VatAmount, order.InvoiceNumber, order.Currency, items,
             payment is null ? null : new OrderPaymentSummary(payment.Provider, payment.ProviderReference, payment.Status, payment.Amount, payment.ConfirmedAt, payment.AmountTendered, payment.AmountTendered - payment.Amount),
+            delivery is null ? null : new OrderDeliverySummary(delivery.Status, delivery.DriverName),
             order.CreatedAt, order.UpdatedAt);
     }
 

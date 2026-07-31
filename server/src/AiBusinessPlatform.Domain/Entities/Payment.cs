@@ -17,6 +17,12 @@ public class Payment : ITenantScoped
     public string? ExternalReference { get; set; }
     public string? PollUrl { get; set; }
 
+    // EcoCash-specific — the (normalized, international-format) phone number that was actually
+    // charged, needed later by GetPaymentStatusAsync to call EcoCash's real status-check endpoint
+    // (GET /{endUserId}/transactions/amount/{clientCorrelator} — clientCorrelator is ProviderReference).
+    // Null for every other provider/path.
+    public string? EcoCashEndUserId { get; set; }
+
     // Cash-tender tracking (POS only) — lets the receipt show what was handed over and the change
     // given back; ChangeDue is computed at read time (AmountTendered - Amount), never persisted.
     public decimal? AmountTendered { get; set; }

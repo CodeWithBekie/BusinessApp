@@ -1,34 +1,84 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { ReactNode, useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, TextInput } from 'react-native';
+import { Fragment, useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Modal, ScrollView, StyleSheet, TextInput } from 'react-native';
+import type { SFSymbol } from 'sf-symbols-typescript';
 
-import { apiClient, MarketplaceOrderDetail } from '@/src/api/client';
+import { apiClient, MarketplaceOrderDetail, OrderStatus } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Icon } from '@/components/ui/Icon';
+import { Section } from '@/components/ui/Section';
 import { useColorScheme } from '@/components/useColorScheme';
+import Colors from '@/constants/Colors';
+import { semanticColors } from '@/constants/theme';
+import { colorFor, initialsFor } from '@/src/marketplace/avatar';
 import { formatMoney, ORDER_STATUS_COLORS } from '@/src/orders/orderStatus';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
 import { useIsOnline } from '@/src/offline/networkStatus';
 
 const PAYMENT_STATUS_COLORS: Record<string, string> = {
-  Pending: '#f2994a',
-  Confirmed: '#2e7d32',
-  Failed: '#c0392b',
+  Pending: semanticColors.warning,
+  Confirmed: semanticColors.success,
+  Failed: semanticColors.danger,
 };
 
-function Badge({ label, color }: { label: string; color: string }) {
+const DELIVERY_STATUS_COLORS: Record<string, string> = {
+  Pending: semanticColors.neutral,
+  Assigned: semanticColors.warning,
+  InTransit: '#2f80ed',
+  Delivered: semanticColors.success,
+};
+
+const STATUS_ICONS: Record<OrderStatus, SFSymbol> = {
+  Quoted: 'doc.text',
+  Invoiced: 'clock',
+  Paid: 'checkmark.circle',
+  Fulfilled: 'checkmark.seal',
+  Cancelled: 'xmark.circle',
+};
+
+const PROGRESS_STEPS: { status: OrderStatus; label: string }[] = [
+  { status: 'Quoted', label: 'Quoted' },
+  { status: 'Invoiced', label: 'Invoiced' },
+  { status: 'Paid', label: 'Paid' },
+  { status: 'Fulfilled', label: 'Fulfilled' },
+];
+
+function BusinessAvatar({ name, size = 40 }: { name: string; size?: number }) {
   return (
-    <View style={[styles.badge, { backgroundColor: color }]}>
-      <Text style={styles.badgeText}>{label}</Text>
+    <View style={[styles.avatar, { backgroundColor: colorFor(name), width: size, height: size, borderRadius: size / 2 }]} lightColor="transparent" darkColor="transparent">
+      <Text style={[styles.avatarText, { fontSize: size * 0.36 }]}>{initialsFor(name)}</Text>
     </View>
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function OrderProgress({ status, tint, isDark }: { status: OrderStatus; tint: string; isDark: boolean }) {
+  if (status === 'Cancelled') return null;
+  const currentIndex = PROGRESS_STEPS.findIndex((s) => s.status === status);
+  const trackColor = isDark ? 'rgba(255,255,255,0.12)' : '#e5e5ea';
+
   return (
-    <View style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {children}
+    <View style={styles.progressRow} lightColor="transparent" darkColor="transparent">
+      {PROGRESS_STEPS.map((step, i) => {
+        const reached = i <= currentIndex;
+        const isCurrent = i === currentIndex;
+        return (
+          <Fragment key={step.status}>
+            <View style={styles.progressStep} lightColor="transparent" darkColor="transparent">
+              <View style={[styles.progressDot, { backgroundColor: reached ? tint : trackColor }, isCurrent && styles.progressDotCurrent]}>
+                {reached && <Icon name="checkmark" size={11} color="#fff" />}
+              </View>
+              <Text style={[styles.progressLabel, reached ? { color: tint, fontWeight: '700' } : styles.progressLabelMuted]}>{step.label}</Text>
+            </View>
+            {i < PROGRESS_STEPS.length - 1 && (
+              <View style={[styles.progressLine, { backgroundColor: i < currentIndex ? tint : trackColor }]} />
+            )}
+          </Fragment>
+        );
+      })}
     </View>
   );
 }
@@ -36,9 +86,11 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 export default function MyOrderDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const tint = Colors[colorScheme].tint;
   const isOnline = useIsOnline();
-  const metaStyle = colorScheme === 'dark' ? styles.metaDark : styles.metaLight;
-  const inputStyle = [styles.input, colorScheme === 'dark' ? styles.inputDark : styles.inputLight];
+  const metaStyle = isDark ? styles.metaDark : styles.metaLight;
+  const inputStyle = [styles.input, isDark ? styles.inputDark : styles.inputLight];
 
   const fetchOrder = useCallback(() => apiClient.getMyMarketplaceOrder(id!), [id]);
   const { data: order, error, isFromCache, reload: load } = useCachedFetch<MarketplaceOrderDetail>(`customer-order:${id}`, fetchOrder);
@@ -144,26 +196,45 @@ export default function MyOrderDetailScreen() {
       {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
       {!error && order === null && <ActivityIndicator style={styles.loading} />}
       {!error && order !== null && (
-        <>
-          <View style={styles.headerRow} lightColor="transparent" darkColor="transparent">
-            <Badge label={order.status} color={ORDER_STATUS_COLORS[order.status]} />
-            <Text style={[styles.updatedAt, metaStyle]}>Updated {new Date(order.updatedAt).toLocaleString()}</Text>
-          </View>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <Card style={styles.heroCard}>
+            <View style={styles.heroTopRow} lightColor="transparent" darkColor="transparent">
+              <View style={styles.businessRow} lightColor="transparent" darkColor="transparent">
+                <BusinessAvatar name={order.businessName} />
+                <View lightColor="transparent" darkColor="transparent">
+                  <Text style={styles.businessName} numberOfLines={1}>
+                    {order.businessName}
+                  </Text>
+                  <Text style={[styles.updatedAt, metaStyle]}>Updated {new Date(order.updatedAt).toLocaleDateString()}</Text>
+                </View>
+              </View>
+              <Badge label={order.status} color={ORDER_STATUS_COLORS[order.status]} icon={STATUS_ICONS[order.status]} />
+            </View>
 
-          <View style={styles.totalBlock} lightColor="transparent" darkColor="transparent">
-            <Text style={styles.total}>{formatMoney(order.totalAmount, order.currency)}</Text>
-            {order.vatAmount > 0 && (
-              <Text style={[styles.vatNote, metaStyle]}>
-                incl. VAT {formatMoney(order.vatAmount, order.currency)}
-                {order.invoiceNumber !== null ? `  ·  Invoice #${order.invoiceNumber}` : ''}
-              </Text>
-            )}
-            <Text style={[styles.rowSecondary, metaStyle]}>{order.businessName}</Text>
-          </View>
+            <View style={styles.totalBlock} lightColor="transparent" darkColor="transparent">
+              <Text style={[styles.total, { color: tint }]}>{formatMoney(order.totalAmount, order.currency)}</Text>
+              {order.vatAmount > 0 && (
+                <Text style={[styles.vatNote, metaStyle]}>
+                  incl. VAT {formatMoney(order.vatAmount, order.currency)}
+                  {order.invoiceNumber !== null ? `  ·  Invoice #${order.invoiceNumber}` : ''}
+                </Text>
+              )}
+            </View>
+
+            <OrderProgress status={order.status} tint={tint} isDark={isDark} />
+          </Card>
 
           <Section title={`Items (${order.items.length})`}>
-            {order.items.map((item) => (
-              <View key={item.catalogItemId} style={styles.itemRow} lightColor="transparent" darkColor="transparent">
+            {order.items.map((item, index) => (
+              <View
+                key={item.catalogItemId}
+                style={[styles.itemRow, index === order.items.length - 1 && styles.itemRowLast]}
+                lightColor="transparent"
+                darkColor="transparent"
+              >
+                <View style={styles.itemThumbPlaceholder} lightColor="#f2f2f7" darkColor="rgba(255,255,255,0.08)">
+                  <Icon name="cube.box" size={16} color={semanticColors.neutral} />
+                </View>
                 <View style={styles.itemNameCol} lightColor="transparent" darkColor="transparent">
                   <Text style={styles.rowPrimary} numberOfLines={1}>
                     {item.name}
@@ -178,10 +249,10 @@ export default function MyOrderDetailScreen() {
           </Section>
 
           {order.payment && (
-            <Section title="Payment">
+            <Section title="Payment" accentColor={PAYMENT_STATUS_COLORS[order.payment.status] ?? semanticColors.neutral}>
               <View style={styles.headerRow} lightColor="transparent" darkColor="transparent">
                 <Text style={styles.rowPrimary}>{order.payment.provider}</Text>
-                <Badge label={order.payment.status} color={PAYMENT_STATUS_COLORS[order.payment.status] ?? '#8e8e93'} />
+                <Badge label={order.payment.status} color={PAYMENT_STATUS_COLORS[order.payment.status] ?? semanticColors.neutral} />
               </View>
               <Text style={[styles.rowSecondary, metaStyle]}>Ref: {order.payment.providerReference}</Text>
               {order.payment.confirmedAt && (
@@ -190,97 +261,122 @@ export default function MyOrderDetailScreen() {
             </Section>
           )}
 
+          {order.delivery && (
+            <Section title="Delivery" accentColor={DELIVERY_STATUS_COLORS[order.delivery.status] ?? semanticColors.neutral}>
+              <View style={styles.headerRow} lightColor="transparent" darkColor="transparent">
+                <Text style={styles.rowPrimary}>{order.delivery.driverName ?? 'Driver not yet assigned'}</Text>
+                <Badge label={order.delivery.status} color={DELIVERY_STATUS_COLORS[order.delivery.status] ?? semanticColors.neutral} />
+              </View>
+            </Section>
+          )}
+
           {order.canCancelDirectly && (
             <Section title="Pay for this order">
-              {ecocashResult?.instructions && <Text style={[styles.rowSecondary, metaStyle]}>{ecocashResult.instructions}</Text>}
-              {proofSubmitted && <Text style={[styles.rowSecondary, metaStyle]}>Your proof was submitted — the business will review it shortly.</Text>}
-
-              {order.isPaynowConnected && !showPayEcoCash && (
-                <Pressable style={styles.inlineEditButton} onPress={() => setShowPayEcoCash(true)} disabled={!isOnline}>
-                  <Text style={[styles.inlineEditButtonText, !isOnline && styles.buttonDisabled]}>Pay with EcoCash</Text>
-                </Pressable>
+              {ecocashResult?.instructions && (
+                <View style={styles.noticeBox} lightColor="rgba(46,125,50,0.08)" darkColor="rgba(46,125,50,0.15)">
+                  <Icon name="checkmark.circle" size={14} color={semanticColors.success} />
+                  <Text style={[styles.rowSecondary, { flex: 1, marginTop: 0 }]}>{ecocashResult.instructions}</Text>
+                </View>
               )}
+              {proofSubmitted && (
+                <View style={styles.noticeBox} lightColor="rgba(242,153,74,0.1)" darkColor="rgba(242,153,74,0.15)">
+                  <Icon name="clock" size={14} color={semanticColors.warning} />
+                  <Text style={[styles.rowSecondary, { flex: 1, marginTop: 0 }]}>Your proof was submitted — the business will review it shortly.</Text>
+                </View>
+              )}
+
+              <View style={styles.payActions} lightColor="transparent" darkColor="transparent">
+                {order.isPaynowConnected && !showPayEcoCash && (
+                  <Button label="Pay with EcoCash" variant="secondary" onPress={() => setShowPayEcoCash(true)} disabled={!isOnline} />
+                )}
+
+                <Button
+                  label={uploadingProof ? 'Uploading…' : 'Upload payment proof'}
+                  variant="secondary"
+                  onPress={pickAndUploadProof}
+                  disabled={uploadingProof || !isOnline}
+                />
+              </View>
+
               {showPayEcoCash && (
                 <View style={styles.inlineForm} lightColor="transparent" darkColor="transparent">
                   <TextInput
                     style={inputStyle}
                     placeholder="EcoCash phone number"
+                    placeholderTextColor="#8e8e93"
                     value={ecocashPhoneNumber}
                     onChangeText={setEcocashPhoneNumber}
                     keyboardType="phone-pad"
                   />
                   <View style={styles.inlineFormActions} lightColor="transparent" darkColor="transparent">
-                    <Pressable style={styles.modalCancelButtonWide} onPress={() => setShowPayEcoCash(false)} disabled={payingEcoCash}>
-                      <Text style={styles.modalCancelText}>Cancel</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.button, styles.inlineFormConfirmButton, (payingEcoCash || !isOnline) && styles.buttonDisabled]}
-                      disabled={payingEcoCash || !isOnline}
+                    <Button label="Cancel" variant="secondary" onPress={() => setShowPayEcoCash(false)} disabled={payingEcoCash} style={styles.inlineFormButton} />
+                    <Button
+                      label={payingEcoCash ? 'Paying…' : 'Pay'}
                       onPress={submitPayEcoCash}
-                    >
-                      <Text style={styles.buttonText}>{payingEcoCash ? 'Paying…' : 'Pay'}</Text>
-                    </Pressable>
+                      disabled={payingEcoCash || !isOnline}
+                      style={styles.inlineFormButton}
+                    />
                   </View>
                 </View>
               )}
-
-              <Pressable
-                style={[styles.inlineEditButton, uploadingProof && styles.buttonDisabled]}
-                onPress={pickAndUploadProof}
-                disabled={uploadingProof || !isOnline}
-              >
-                <Text style={styles.inlineEditButtonText}>{uploadingProof ? 'Uploading…' : 'Upload payment proof'}</Text>
-              </Pressable>
             </Section>
           )}
 
-          {actionError && <Text style={styles.error}>{actionError}</Text>}
-          {!isOnline && <Text style={styles.offlineNotice}>You're offline — some actions are disabled.</Text>}
+          {actionError && (
+            <View style={styles.noticeBox} lightColor="rgba(192,57,43,0.08)" darkColor="rgba(192,57,43,0.15)">
+              <Icon name="exclamationmark.triangle" size={14} color={semanticColors.danger} />
+              <Text style={[styles.error, { flex: 1, marginTop: 0, marginBottom: 0 }]}>{actionError}</Text>
+            </View>
+          )}
+          {!isOnline && (
+            <View style={styles.noticeBox} lightColor="rgba(192,57,43,0.08)" darkColor="rgba(192,57,43,0.15)">
+              <Icon name="wifi.slash" size={14} color={semanticColors.danger} />
+              <Text style={[styles.offlineNotice, { flex: 1, marginBottom: 0 }]}>You're offline — some actions are disabled.</Text>
+            </View>
+          )}
 
           {order.canCancelDirectly && (
-            <Pressable
-              style={[styles.secondaryButton, (cancelling || !isOnline) && styles.buttonDisabled]}
+            <Button
+              label={cancelling ? 'Cancelling…' : 'Cancel order'}
+              variant="destructive"
               disabled={cancelling || !isOnline}
               onPress={() => setConfirmCancelVisible(true)}
-            >
-              <Text style={styles.secondaryButtonText}>{cancelling ? 'Cancelling…' : 'Cancel order'}</Text>
-            </Pressable>
+              style={styles.destructiveButton}
+            />
           )}
 
           {order.canRequestCancellation && !showRequestCancellation && (
-            <Pressable
-              style={[styles.secondaryButton, !isOnline && styles.buttonDisabled]}
+            <Button
+              label="Request cancellation"
+              variant="destructive"
               disabled={!isOnline}
               onPress={() => setShowRequestCancellation(true)}
-            >
-              <Text style={styles.secondaryButtonText}>Request cancellation</Text>
-            </Pressable>
+              style={styles.destructiveButton}
+            />
           )}
           {order.canRequestCancellation && showRequestCancellation && (
             <View style={styles.inlineForm} lightColor="transparent" darkColor="transparent">
               <TextInput
                 style={inputStyle}
                 placeholder="Reason (optional)"
+                placeholderTextColor="#8e8e93"
                 value={cancellationReason}
                 onChangeText={setCancellationReason}
               />
               <View style={styles.inlineFormActions} lightColor="transparent" darkColor="transparent">
-                <Pressable style={styles.modalCancelButtonWide} onPress={() => setShowRequestCancellation(false)} disabled={requestingCancellation}>
-                  <Text style={styles.modalCancelText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.button, styles.inlineFormConfirmButton, (requestingCancellation || !isOnline) && styles.buttonDisabled]}
-                  disabled={requestingCancellation || !isOnline}
+                <Button label="Cancel" variant="secondary" onPress={() => setShowRequestCancellation(false)} disabled={requestingCancellation} style={styles.inlineFormButton} />
+                <Button
+                  label={requestingCancellation ? 'Sending…' : 'Send request'}
                   onPress={submitRequestCancellation}
-                >
-                  <Text style={styles.buttonText}>{requestingCancellation ? 'Sending…' : 'Send request'}</Text>
-                </Pressable>
+                  disabled={requestingCancellation || !isOnline}
+                  style={styles.inlineFormButton}
+                />
               </View>
             </View>
           )}
 
           <Text style={[styles.createdAt, metaStyle]}>Order placed {new Date(order.createdAt).toLocaleString()}</Text>
-        </>
+        </ScrollView>
       )}
 
       <Modal visible={confirmCancelVisible} transparent animationType="fade" onRequestClose={() => setConfirmCancelVisible(false)}>
@@ -289,12 +385,8 @@ export default function MyOrderDetailScreen() {
             <Text style={styles.modalTitle}>Cancel this order?</Text>
             <Text style={[styles.modalBody, metaStyle]}>This can't be undone — you'll need to place a new order if you change your mind.</Text>
             <View style={styles.modalActions} lightColor="transparent" darkColor="transparent">
-              <Pressable style={[styles.modalButton, styles.modalCancelButton]} onPress={() => setConfirmCancelVisible(false)}>
-                <Text style={styles.modalCancelText}>Keep order</Text>
-              </Pressable>
-              <Pressable style={[styles.modalButton, styles.button]} onPress={performCancel}>
-                <Text style={styles.buttonText}>Cancel order</Text>
-              </Pressable>
+              <Button label="Keep order" variant="secondary" onPress={() => setConfirmCancelVisible(false)} style={styles.modalButton} />
+              <Button label="Cancel order" variant="destructive" onPress={performCancel} style={styles.modalButton} />
             </View>
           </View>
         </View>
@@ -304,48 +396,53 @@ export default function MyOrderDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 32 },
+  container: { flex: 1, paddingTop: 16 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 32 },
   loading: { marginTop: 40 },
-  error: { color: '#c0392b', marginBottom: 12 },
-  cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
-  offlineNotice: { color: '#c0392b', fontSize: 12, marginBottom: 12 },
+  error: { color: semanticColors.danger, marginBottom: 12 },
+  cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12, marginHorizontal: 16 },
+  offlineNotice: { color: semanticColors.danger, fontSize: 12 },
+  heroCard: { marginBottom: 16 },
+  heroTopRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 },
+  businessRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1, marginRight: 8 },
+  businessName: { fontSize: 15, fontWeight: '700' },
+  updatedAt: { fontSize: 12, marginTop: 1 },
+  totalBlock: { marginBottom: 18 },
+  total: { fontSize: 34, fontWeight: '800' },
+  vatNote: { fontSize: 12, marginTop: 4 },
+  avatar: { alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: '#fff', fontWeight: '700' },
+  progressRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  progressStep: { alignItems: 'center', width: 62 },
+  progressDot: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  progressDotCurrent: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.3, shadowRadius: 3, elevation: 2 },
+  progressLabel: { fontSize: 10, marginTop: 5, textAlign: 'center' },
+  progressLabelMuted: { fontSize: 10, opacity: 0.4 },
+  progressLine: { flex: 1, height: 2, marginTop: 13, marginHorizontal: -8 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  updatedAt: { fontSize: 12 },
-  totalBlock: { marginBottom: 20 },
-  total: { fontSize: 30, fontWeight: '700' },
-  vatNote: { fontSize: 12, marginTop: 2 },
-  section: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 14, marginBottom: 16 },
-  sectionTitle: { fontSize: 12, fontWeight: '700', opacity: 0.5, textTransform: 'uppercase', marginBottom: 10 },
   rowPrimary: { fontSize: 15, fontWeight: '600' },
   rowSecondary: { fontSize: 13, marginTop: 2 },
-  itemRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  itemNameCol: { flexShrink: 1, paddingRight: 12 },
-  itemSubtotal: { fontSize: 14, fontWeight: '600' },
-  createdAt: { fontSize: 12, marginBottom: 8 },
+  itemRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
+  itemRowLast: { marginBottom: 0 },
+  itemThumbPlaceholder: { width: 38, height: 38, borderRadius: 9, marginRight: 12, alignItems: 'center', justifyContent: 'center' },
+  itemNameCol: { flex: 1, flexShrink: 1, paddingRight: 12 },
+  itemSubtotal: { fontSize: 14, fontWeight: '700' },
+  createdAt: { fontSize: 12, marginTop: 4, textAlign: 'center' },
   metaLight: { color: '#666' },
   metaDark: { color: '#aaa' },
-  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, alignSelf: 'flex-start' },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  button: { backgroundColor: '#007aff', paddingVertical: 14, borderRadius: 8, alignItems: 'center' },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontWeight: '600', fontSize: 15 },
-  secondaryButton: { borderWidth: 1, borderColor: '#c0392b', paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
-  secondaryButtonText: { color: '#c0392b', fontWeight: '600' },
-  inlineEditButton: { marginTop: 10 },
-  inlineEditButtonText: { color: '#007aff', fontWeight: '600', fontSize: 13 },
-  inlineForm: { marginTop: 10, gap: 8 },
-  inlineFormActions: { flexDirection: 'row', gap: 12, marginTop: 4 },
-  inlineFormConfirmButton: { flex: 1 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8 },
+  noticeBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderRadius: 10, padding: 10, marginBottom: 10 },
+  payActions: { gap: 10 },
+  destructiveButton: { marginBottom: 10 },
+  inlineForm: { marginTop: 12, gap: 10 },
+  inlineFormActions: { flexDirection: 'row', gap: 12, marginTop: 2 },
+  inlineFormButton: { flex: 1 },
+  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
   inputLight: { color: '#000' },
   inputDark: { color: '#fff' },
   modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  modalCard: { width: '100%', maxWidth: 360, borderRadius: 12, padding: 20 },
+  modalCard: { width: '100%', maxWidth: 360, borderRadius: 16, padding: 22 },
   modalTitle: { fontSize: 17, fontWeight: '700', marginBottom: 8 },
-  modalBody: { fontSize: 14, marginBottom: 20 },
+  modalBody: { fontSize: 14, marginBottom: 20, lineHeight: 20 },
   modalActions: { flexDirection: 'row', gap: 12 },
-  modalButton: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  modalCancelButton: { borderWidth: 1, borderColor: '#ccc' },
-  modalCancelButtonWide: { flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ccc' },
-  modalCancelText: { fontWeight: '600' },
+  modalButton: { flex: 1 },
 });

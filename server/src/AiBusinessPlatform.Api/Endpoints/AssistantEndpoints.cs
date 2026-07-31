@@ -59,8 +59,46 @@ public static class AssistantEndpoints
     // event is a JSON object — {"type":"token","text":...} while streaming, then a single
     // {"type":"done","citations":[...],"toolsUsed":[...]} (or {"type":"error","message":...} on
     // failure) to close the stream.
+    // Fixed, known set of owner-facing suggestion prompts (see Mcp/Prompts/OwnerSuggestionPrompts.cs)
+    // — this app owns both ends, so there's no need to discover prompts dynamically via
+    // ListPromptsAsync; the endpoint just resolves each by name to get its current message text.
+    private static readonly (string Name, string Title)[] SuggestionPrompts =
+    [
+        ("sales_this_week", "How are sales this week?"),
+        ("top_selling_items", "What were our top-selling items this month?"),
+        ("sales_today", "Any sales today?"),
+    ];
+
     public static void MapAssistantEndpoints(this WebApplication app)
     {
+        // Backs the mobile Assistant tab's suggestion chips (Title = chip label, Message = what's
+        // actually sent when tapped) — resolved live from the MCP server's Prompts so the content
+        // can be updated with a server deploy, no mobile release needed.
+        app.MapGet("/api/assistant/prompts", async (
+            IOptions<McpServerOptions> mcpServerOptions, HttpRequest httpRequest, CancellationToken cancellationToken) =>
+        {
+            var transport = new HttpClientTransport(new HttpClientTransportOptions
+            {
+                Endpoint = new Uri(mcpServerOptions.Value.BaseUrl),
+                AdditionalHeaders = new Dictionary<string, string> { ["Authorization"] = httpRequest.Headers.Authorization.ToString() }
+            });
+
+            await using var mcpClient = await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
+
+            var results = new List<AssistantPromptResponse>();
+            foreach (var (name, title) in SuggestionPrompts)
+            {
+                var result = await mcpClient.GetPromptAsync(name, cancellationToken: cancellationToken);
+                var message = result.Messages
+                    .Select(m => m.Content)
+                    .OfType<TextContentBlock>()
+                    .Select(c => c.Text)
+                    .FirstOrDefault() ?? title;
+                results.Add(new AssistantPromptResponse(name, title, message));
+            }
+            return Results.Ok(results);
+        }).RequireAuthorization("BusinessOnly");
+
         // Lets the mobile "Attach" picker enumerate resources/templates before the user sends a
         // message — resources aren't part of the model's automatic tool-calling loop, so the host
         // (this endpoint's caller) decides what to attach, matching how a real MCP host works.
@@ -286,9 +324,6 @@ public static class AssistantEndpoints
         }
     }
 
-    private static async Task WriteSseAsync(HttpResponse response, object payload, CancellationToken cancellationToken)
-    {
-        await response.WriteAsync($"data: {JsonSerializer.Serialize(payload)}\n\n", cancellationToken);
-        await response.Body.FlushAsync(cancellationToken);
-    }
+    private static Task WriteSseAsync(HttpResponse response, object payload, CancellationToken cancellationToken)
+        => SseWriter.WriteAsync(response, payload, cancellationToken);
 }

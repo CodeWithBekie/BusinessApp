@@ -1,10 +1,15 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { ReactNode, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
 
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Chip } from '@/components/ui/Chip';
+import { Section } from '@/components/ui/Section';
 import { apiClient, PosPaymentMethod, PurchaseOrderDetail, ReceivedLinePrice } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
+import { semanticColors, spacing } from '@/constants/theme';
 import { formatMoney } from '@/src/common/format';
 import { downloadAndShareDocument } from '@/src/documents/downloadAndShare';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
@@ -14,28 +19,11 @@ import { useHasPermission } from '@/src/auth/permissions';
 const SUPPLIER_PAYMENT_METHODS: readonly PosPaymentMethod[] = ['Cash', 'EcoCash', 'Bank', 'Other'];
 
 const PO_STATUS_COLORS: Record<string, string> = {
-  Draft: '#8e8e93',
-  Ordered: '#f2994a',
-  Received: '#2e7d32',
-  Cancelled: '#c0392b',
+  Draft: semanticColors.neutral,
+  Ordered: semanticColors.warning,
+  Received: semanticColors.success,
+  Cancelled: semanticColors.danger,
 };
-
-function Badge({ label, color }: { label: string; color: string }) {
-  return (
-    <View style={[styles.badge, { backgroundColor: color }]}>
-      <Text style={styles.badgeText}>{label}</Text>
-    </View>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <View style={styles.section} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {children}
-    </View>
-  );
-}
 
 export default function PurchaseOrderDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -140,7 +128,7 @@ export default function PurchaseOrderDetailScreen() {
       {!error && po !== null && (
         <>
           <View style={styles.headerRow} lightColor="transparent" darkColor="transparent">
-            <Badge label={po.status} color={PO_STATUS_COLORS[po.status] ?? '#8e8e93'} />
+            <Badge label={po.status} color={PO_STATUS_COLORS[po.status] ?? semanticColors.neutral} />
             <Text style={[styles.updatedAt, metaStyle]}>Updated {new Date(po.updatedAt).toLocaleString()}</Text>
           </View>
 
@@ -162,11 +150,7 @@ export default function PurchaseOrderDetailScreen() {
                       <Text style={styles.rowPrimary} numberOfLines={1}>
                         {item.name}
                       </Text>
-                      {item.isNewItem && (
-                        <View style={styles.newBadge}>
-                          <Text style={styles.newBadgeText}>New</Text>
-                        </View>
-                      )}
+                      {item.isNewItem && <Badge label="New" color={semanticColors.warning} />}
                     </View>
                     <Text style={[styles.rowSecondary, metaStyle]}>
                       {item.quantity} × {formatMoney(item.unitCost, po.currency)}
@@ -199,30 +183,28 @@ export default function PurchaseOrderDetailScreen() {
 
           {actionError && <Text style={styles.error}>{actionError}</Text>}
 
-          <Pressable
-            style={[styles.secondaryButton, downloadingDocument && styles.buttonDisabled]}
+          <Button
+            label={downloadingDocument ? 'Preparing…' : 'Download document'}
+            variant="secondary"
+            style={styles.spacedButton}
             disabled={downloadingDocument}
             onPress={downloadDocument}
-          >
-            <Text style={styles.secondaryButtonText}>{downloadingDocument ? 'Preparing…' : 'Download document'}</Text>
-          </Pressable>
+          />
 
-          <Pressable
-            style={styles.secondaryButton}
+          <Button
+            label="Ask Assistant about this"
+            variant="secondary"
+            style={styles.spacedButton}
             onPress={() =>
               router.push({
                 pathname: '/(tabs)/assistant',
                 params: { attachUri: `business://purchase-orders/${po.id}`, attachLabel: `PO #${po.id.slice(0, 8)}` },
               })
             }
-          >
-            <Text style={styles.secondaryButtonText}>Ask Assistant about this</Text>
-          </Pressable>
+          />
 
           {canManageSuppliers && po.amountOwed > 0 && !showPaymentForm && (
-            <Pressable style={[styles.secondaryButton, !isOnline && styles.buttonDisabled]} disabled={!isOnline} onPress={() => setShowPaymentForm(true)}>
-              <Text style={styles.secondaryButtonText}>Record payment to supplier</Text>
-            </Pressable>
+            <Button label="Record payment to supplier" variant="secondary" style={styles.spacedButton} disabled={!isOnline} onPress={() => setShowPaymentForm(true)} />
           )}
 
           {showPaymentForm && (
@@ -236,50 +218,37 @@ export default function PurchaseOrderDetailScreen() {
                 placeholder={formatMoney(po.amountOwed, po.currency)}
               />
               <View style={styles.providerRow} lightColor="transparent" darkColor="transparent">
-                {SUPPLIER_PAYMENT_METHODS.map((method) => {
-                  const active = method === paymentProvider;
-                  return (
-                    <Pressable key={method} onPress={() => setPaymentProvider(method)} style={[styles.providerChip, active && styles.providerChipActive]}>
-                      <Text style={[styles.providerChipText, active && styles.providerChipTextActive]}>{method}</Text>
-                    </Pressable>
-                  );
-                })}
+                {SUPPLIER_PAYMENT_METHODS.map((method) => (
+                  <Chip key={method} label={method} active={method === paymentProvider} onPress={() => setPaymentProvider(method)} />
+                ))}
               </View>
               {paymentError && <Text style={styles.error}>{paymentError}</Text>}
               <View style={styles.receiveActions} lightColor="transparent" darkColor="transparent">
-                <Pressable style={styles.modalCancelButtonWide} onPress={() => setShowPaymentForm(false)} disabled={recordingPayment}>
-                  <Text style={styles.modalCancelText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.button, styles.receiveConfirmButton, (recordingPayment || !isOnline) && styles.buttonDisabled]}
+                <Button label="Cancel" variant="secondary" style={styles.flexButton} onPress={() => setShowPaymentForm(false)} disabled={recordingPayment} />
+                <Button
+                  label={recordingPayment ? 'Recording…' : 'Confirm payment'}
+                  style={styles.flexButton}
                   disabled={recordingPayment || !isOnline}
                   onPress={recordPayment}
-                >
-                  <Text style={styles.buttonText}>{recordingPayment ? 'Recording…' : 'Confirm payment'}</Text>
-                </Pressable>
+                />
               </View>
             </View>
           )}
 
           {po.status === 'Ordered' && !showReceiveForm && (
-            <Pressable style={[styles.button, !isOnline && styles.buttonDisabled]} disabled={!isOnline} onPress={startReceiving}>
-              <Text style={styles.buttonText}>Mark as received</Text>
-            </Pressable>
+            <Button label="Mark as received" style={styles.spacedButton} disabled={!isOnline} onPress={startReceiving} />
           )}
           {po.status === 'Ordered' && !isOnline && <Text style={styles.offlineNotice}>You're offline — receiving is disabled.</Text>}
 
           {po.status === 'Ordered' && showReceiveForm && (
             <View style={styles.receiveActions} lightColor="transparent" darkColor="transparent">
-              <Pressable style={styles.modalCancelButtonWide} onPress={() => setShowReceiveForm(false)} disabled={receiving}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.button, styles.receiveConfirmButton, (receiving || !isOnline) && styles.buttonDisabled]}
+              <Button label="Cancel" variant="secondary" style={styles.flexButton} onPress={() => setShowReceiveForm(false)} disabled={receiving} />
+              <Button
+                label={receiving ? 'Confirming…' : 'Confirm receipt'}
+                style={styles.flexButton}
                 disabled={receiving || !isOnline}
                 onPress={performReceive}
-              >
-                <Text style={styles.buttonText}>{receiving ? 'Confirming…' : 'Confirm receipt'}</Text>
-              </Pressable>
+              />
             </View>
           )}
         </>
@@ -291,21 +260,15 @@ export default function PurchaseOrderDetailScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 32 },
   loading: { marginTop: 40 },
-  error: { color: '#c0392b', marginBottom: 12 },
+  error: { color: semanticColors.danger, marginBottom: 12 },
   cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
-  offlineNotice: { color: '#c0392b', fontSize: 12, marginTop: 8 },
+  offlineNotice: { color: semanticColors.danger, fontSize: 12, marginTop: 8 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   updatedAt: { fontSize: 12 },
   total: { fontSize: 30, fontWeight: '700', marginBottom: 4 },
   amountOwedNote: { fontSize: 13, marginBottom: 16 },
   paymentForm: { marginTop: 12, marginBottom: 4 },
-  providerRow: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' },
-  providerChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#ccc' },
-  providerChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
-  providerChipText: { fontSize: 13, fontWeight: '600', opacity: 0.7 },
-  providerChipTextActive: { color: '#fff', opacity: 1 },
-  section: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 14, marginBottom: 16 },
-  sectionTitle: { fontSize: 12, fontWeight: '700', opacity: 0.5, textTransform: 'uppercase', marginBottom: 10 },
+  providerRow: { flexDirection: 'row', gap: spacing.sm, marginTop: 10, flexWrap: 'wrap' },
   rowPrimary: { fontSize: 15, fontWeight: '600' },
   rowSecondary: { fontSize: 13, marginTop: 2 },
   itemBlock: { marginBottom: 12 },
@@ -316,20 +279,10 @@ const styles = StyleSheet.create({
   createdAt: { fontSize: 12, marginBottom: 8 },
   metaLight: { color: '#666' },
   metaDark: { color: '#aaa' },
-  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, alignSelf: 'flex-start' },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  button: { backgroundColor: '#007aff', paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 12 },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontWeight: '600', fontSize: 15 },
-  secondaryButton: { borderWidth: 1, borderColor: '#007aff', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  secondaryButtonText: { color: '#007aff', fontWeight: '600' },
-  newBadge: { backgroundColor: '#f2994a', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  newBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  spacedButton: { marginTop: spacing.md },
   priceRow: { marginTop: 8 },
   priceLabel: { fontSize: 11, marginBottom: 4 },
   priceInput: { borderWidth: 1, borderColor: '#ccc', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, color: '#000' },
   receiveActions: { flexDirection: 'row', gap: 12, marginTop: 12 },
-  receiveConfirmButton: { flex: 1, marginTop: 0 },
-  modalCancelButtonWide: { flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ccc' },
-  modalCancelText: { fontWeight: '600' },
+  flexButton: { flex: 1 },
 });

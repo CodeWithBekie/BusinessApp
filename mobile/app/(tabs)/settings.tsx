@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, TextInput } from 'react-native';
 
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Chip } from '@/components/ui/Chip';
 import { apiClient, BusinessUserRole, StaffInviteResult, StaffSummary } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
+import { semanticColors, spacing, typography } from '@/constants/theme';
 import { useAuth } from '@/src/auth/AuthContext';
 import { useIsOnline } from '@/src/offline/networkStatus';
 import { useHasPermission } from '@/src/auth/permissions';
@@ -39,7 +43,7 @@ function WhatsAppConnectForm() {
   };
 
   return (
-    <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+    <Card style={styles.card}>
       <Text style={styles.cardTitle}>WhatsApp connection</Text>
       <Text style={styles.cardSubtitle}>Paste in values from your Meta developer dashboard.</Text>
       <TextInput style={inputStyle} placeholder="WABA ID" value={wabaId} onChangeText={setWabaId} autoCapitalize="none" />
@@ -58,12 +62,10 @@ function WhatsAppConnectForm() {
         autoCapitalize="none"
         secureTextEntry
       />
-      <Pressable style={[styles.button, !isOnline && styles.buttonDisabled]} disabled={status === 'saving' || !isOnline} onPress={submit}>
-        <Text style={styles.buttonText}>{status === 'saving' ? 'Connecting…' : 'Connect'}</Text>
-      </Pressable>
+      <Button label={status === 'saving' ? 'Connecting…' : 'Connect'} disabled={status === 'saving' || !isOnline} onPress={submit} />
       {message && <Text style={status === 'error' ? styles.error : styles.success}>{message}</Text>}
       {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
-    </View>
+    </Card>
   );
 }
 
@@ -97,7 +99,7 @@ function PaynowConnectForm() {
   };
 
   return (
-    <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+    <Card style={styles.card}>
       <Text style={styles.cardTitle}>Paynow connection</Text>
       <Text style={styles.cardSubtitle}>Paste in your Integration ID and Key from your Paynow merchant dashboard.</Text>
       <TextInput style={inputStyle} placeholder="Integration ID" value={integrationId} onChangeText={setIntegrationId} autoCapitalize="none" />
@@ -117,12 +119,69 @@ function PaynowConnectForm() {
         autoCapitalize="none"
         keyboardType="email-address"
       />
-      <Pressable style={[styles.button, !isOnline && styles.buttonDisabled]} disabled={status === 'saving' || !isOnline} onPress={submit}>
-        <Text style={styles.buttonText}>{status === 'saving' ? 'Connecting…' : 'Connect'}</Text>
-      </Pressable>
+      <Button label={status === 'saving' ? 'Connecting…' : 'Connect'} disabled={status === 'saving' || !isOnline} onPress={submit} />
       {message && <Text style={status === 'error' ? styles.error : styles.success}>{message}</Text>}
       {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
-    </View>
+    </Card>
+  );
+}
+
+// Real EcoCash Instant Payment sandbox integration — a genuine alternate gateway alongside Paynow
+// above, not a replacement. See EcoCashConnectRequest on the Api side.
+function EcoCashConnectForm() {
+  const inputStyle = useInputStyle();
+  const isOnline = useIsOnline();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [merchantCode, setMerchantCode] = useState('');
+  const [merchantPin, setMerchantPin] = useState('');
+  const [merchantNumber, setMerchantNumber] = useState('');
+  const [merchantName, setMerchantName] = useState('');
+  const [superMerchantName, setSuperMerchantName] = useState('');
+  const [status, setStatus] = useState<'idle' | 'saving' | 'error' | 'saved'>('idle');
+  const [message, setMessage] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!username.trim() || !password.trim() || !merchantCode.trim() || !merchantPin.trim() || !merchantNumber.trim()) {
+      setStatus('error');
+      setMessage('Username, password, merchant code, merchant PIN, and merchant number are required.');
+      return;
+    }
+    setStatus('saving');
+    setMessage(null);
+    try {
+      await apiClient.connectEcoCash({
+        username: username.trim(),
+        password: password.trim(),
+        merchantCode: merchantCode.trim(),
+        merchantPin: merchantPin.trim(),
+        merchantNumber: merchantNumber.trim(),
+        merchantName: merchantName.trim(),
+        superMerchantName: superMerchantName.trim(),
+      });
+      setStatus('saved');
+      setMessage('Connected.');
+    } catch (err) {
+      setStatus('error');
+      setMessage((err as Error).message);
+    }
+  };
+
+  return (
+    <Card style={styles.card}>
+      <Text style={styles.cardTitle}>EcoCash connection</Text>
+      <Text style={styles.cardSubtitle}>Paste in your EcoCash Instant Payment sandbox credentials.</Text>
+      <TextInput style={inputStyle} placeholder="Username" value={username} onChangeText={setUsername} autoCapitalize="none" />
+      <TextInput style={inputStyle} placeholder="Password" value={password} onChangeText={setPassword} autoCapitalize="none" secureTextEntry />
+      <TextInput style={inputStyle} placeholder="Merchant code" value={merchantCode} onChangeText={setMerchantCode} autoCapitalize="none" />
+      <TextInput style={inputStyle} placeholder="Merchant PIN" value={merchantPin} onChangeText={setMerchantPin} autoCapitalize="none" secureTextEntry />
+      <TextInput style={inputStyle} placeholder="Merchant number" value={merchantNumber} onChangeText={setMerchantNumber} autoCapitalize="none" />
+      <TextInput style={inputStyle} placeholder="Merchant name" value={merchantName} onChangeText={setMerchantName} autoCapitalize="none" />
+      <TextInput style={inputStyle} placeholder="Super merchant name" value={superMerchantName} onChangeText={setSuperMerchantName} autoCapitalize="none" />
+      <Button label={status === 'saving' ? 'Connecting…' : 'Connect'} disabled={status === 'saving' || !isOnline} onPress={submit} />
+      {message && <Text style={status === 'error' ? styles.error : styles.success}>{message}</Text>}
+      {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
+    </Card>
   );
 }
 
@@ -157,7 +216,7 @@ function DocumentUploadForm() {
   };
 
   return (
-    <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+    <Card style={styles.card}>
       <Text style={styles.cardTitle}>Upload a policy/FAQ document</Text>
       <Text style={styles.cardSubtitle}>Grounds the assistant's answers to policy questions (return policy, delivery areas, hours, etc.).</Text>
       <TextInput style={inputStyle} placeholder="Title" value={title} onChangeText={setTitle} />
@@ -170,12 +229,10 @@ function DocumentUploadForm() {
         multiline
         numberOfLines={6}
       />
-      <Pressable style={[styles.button, !isOnline && styles.buttonDisabled]} disabled={status === 'saving' || !isOnline} onPress={submit}>
-        <Text style={styles.buttonText}>{status === 'saving' ? 'Uploading…' : 'Upload'}</Text>
-      </Pressable>
+      <Button label={status === 'saving' ? 'Uploading…' : 'Upload'} disabled={status === 'saving' || !isOnline} onPress={submit} />
       {message && <Text style={status === 'error' ? styles.error : styles.success}>{message}</Text>}
       {!isOnline && <Text style={styles.error}>You're offline — connect to upload.</Text>}
-    </View>
+    </Card>
   );
 }
 
@@ -203,7 +260,7 @@ function BusinessVisibilityForm() {
   };
 
   return (
-    <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+    <Card style={styles.card}>
       <Text style={styles.cardTitle}>Customer marketplace</Text>
       <Text style={styles.cardSubtitle}>List your business so customers can browse and order from you in the app.</Text>
       <View style={styles.toggleRow} lightColor="transparent" darkColor="transparent">
@@ -212,7 +269,7 @@ function BusinessVisibilityForm() {
       </View>
       {error && <Text style={styles.error}>{error}</Text>}
       {!isOnline && <Text style={styles.error}>You're offline — connect to change this.</Text>}
-    </View>
+    </Card>
   );
 }
 
@@ -289,15 +346,15 @@ function BusinessDetailsForm() {
 
   if (status === 'loading') {
     return (
-      <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+      <Card style={styles.card}>
         <Text style={styles.cardTitle}>Business details</Text>
         <Text style={styles.cardSubtitle}>Loading…</Text>
-      </View>
+      </Card>
     );
   }
 
   return (
-    <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+    <Card style={styles.card}>
       <Text style={styles.cardTitle}>Business details</Text>
       <Text style={styles.cardSubtitle}>Used on your invoices/receipts. Leave a field blank to omit it from the PDF.</Text>
       <TextInput style={inputStyle} placeholder="TIN" value={tin} onChangeText={setTin} autoCapitalize="none" />
@@ -314,12 +371,10 @@ function BusinessDetailsForm() {
       />
       <TextInput style={inputStyle} placeholder="Device Serial No" value={deviceSerialNumber} onChangeText={setDeviceSerialNumber} autoCapitalize="none" />
       <TextInput style={inputStyle} placeholder="Fiscal Device ID" value={fiscalDeviceId} onChangeText={setFiscalDeviceId} autoCapitalize="none" />
-      <Pressable style={[styles.button, !isOnline && styles.buttonDisabled]} disabled={status === 'saving' || !isOnline} onPress={submit}>
-        <Text style={styles.buttonText}>{status === 'saving' ? 'Saving…' : 'Save'}</Text>
-      </Pressable>
+      <Button label={status === 'saving' ? 'Saving…' : 'Save'} disabled={status === 'saving' || !isOnline} onPress={submit} />
       {message && <Text style={status === 'error' ? styles.error : styles.success}>{message}</Text>}
       {!isOnline && <Text style={styles.error}>You're offline — connect to save.</Text>}
-    </View>
+    </Card>
   );
 }
 
@@ -415,7 +470,7 @@ function StaffManagementForm() {
   };
 
   return (
-    <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+    <Card style={styles.card}>
       <Text style={styles.cardTitle}>Staff</Text>
       <Text style={styles.cardSubtitle}>
         Invite employees and manage their role. There's no email sending yet — share the invite code shown after inviting.
@@ -452,22 +507,22 @@ function StaffManagementForm() {
           {member.id !== currentUserId && (
             <View style={styles.staffActions} lightColor="transparent" darkColor="transparent">
               {(member.status === 'Pending' || member.status === 'Expired') && (
-                <Pressable
-                  style={[styles.staffToggleButton, (updatingId === member.id || !isOnline) && styles.buttonDisabled]}
+                <Button
+                  label="Resend invite"
+                  variant="destructive"
+                  style={styles.staffToggleButton}
                   disabled={updatingId === member.id || !isOnline}
                   onPress={() => resendInvite(member)}
-                >
-                  <Text style={styles.staffToggleButtonText}>Resend invite</Text>
-                </Pressable>
+                />
               )}
               {(member.status === 'Active' || member.status === 'Deactivated') && (
-                <Pressable
-                  style={[styles.staffToggleButton, (updatingId === member.id || !isOnline) && styles.buttonDisabled]}
+                <Button
+                  label={member.isActive ? 'Deactivate' : 'Reactivate'}
+                  variant="destructive"
+                  style={styles.staffToggleButton}
                   disabled={updatingId === member.id || !isOnline}
                   onPress={() => toggleActive(member)}
-                >
-                  <Text style={styles.staffToggleButtonText}>{member.isActive ? 'Deactivate' : 'Reactivate'}</Text>
-                </Pressable>
+                />
               )}
             </View>
           )}
@@ -478,21 +533,14 @@ function StaffManagementForm() {
       <TextInput style={inputStyle} placeholder="Name" value={name} onChangeText={setName} />
       <TextInput style={inputStyle} placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
       <View style={styles.roleRow} lightColor="transparent" darkColor="transparent">
-        {INVITABLE_ROLES.map((option) => {
-          const active = option.value === role;
-          return (
-            <Pressable key={option.value} onPress={() => setRole(option.value)} style={[styles.roleChip, active && styles.roleChipActive]}>
-              <Text style={[styles.roleChipText, active && styles.roleChipTextActive]}>{option.label}</Text>
-            </Pressable>
-          );
-        })}
+        {INVITABLE_ROLES.map((option) => (
+          <Chip key={option.value} label={option.label} active={option.value === role} onPress={() => setRole(option.value)} />
+        ))}
       </View>
-      <Pressable style={[styles.button, (inviting || !isOnline) && styles.buttonDisabled]} disabled={inviting || !isOnline} onPress={invite}>
-        <Text style={styles.buttonText}>{inviting ? 'Inviting…' : 'Invite staff member'}</Text>
-      </Pressable>
+      <Button label={inviting ? 'Inviting…' : 'Invite staff member'} disabled={inviting || !isOnline} onPress={invite} />
       {inviteError && <Text style={styles.error}>{inviteError}</Text>}
       {!isOnline && <Text style={styles.error}>You're offline — connect to manage staff.</Text>}
-    </View>
+    </Card>
   );
 }
 
@@ -517,12 +565,11 @@ export default function SettingsScreen() {
           <BusinessDetailsForm />
           <WhatsAppConnectForm />
           <PaynowConnectForm />
+          <EcoCashConnectForm />
           <DocumentUploadForm />
         </>
       )}
-      <Pressable style={styles.logoutButton} onPress={auth.logout}>
-        <Text style={styles.logoutButtonText}>Log out</Text>
-      </Pressable>
+      <Button label="Log out" variant="destructive" style={styles.logoutButton} onPress={auth.logout} />
     </ScrollView>
   );
 }
@@ -530,15 +577,15 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingTop: 24, paddingHorizontal: 16, paddingBottom: 32 },
-  title: { fontSize: 20, fontWeight: 'bold' },
+  title: { ...typography.title },
   separator: { marginVertical: 16, height: 1, width: '100%' },
-  card: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 16 },
+  card: { marginBottom: spacing.md },
   cardTitle: { fontSize: 16, fontWeight: '600' },
-  cardSubtitle: { fontSize: 12, opacity: 0.6, marginTop: 2, marginBottom: 12 },
+  cardSubtitle: { fontSize: 12, opacity: 0.6, marginTop: 2, marginBottom: spacing.md },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',
-    borderRadius: 6,
+    borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
     marginBottom: 10,
@@ -548,13 +595,9 @@ const styles = StyleSheet.create({
   textArea: { minHeight: 100, textAlignVertical: 'top' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   toggleLabel: { fontSize: 14, fontWeight: '600' },
-  button: { backgroundColor: '#007aff', paddingVertical: 10, borderRadius: 6, alignItems: 'center' },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontWeight: '600' },
-  error: { color: '#c0392b', marginTop: 8 },
-  success: { color: '#2e7d32', marginTop: 8 },
-  logoutButton: { borderWidth: 1, borderColor: '#c0392b', paddingVertical: 10, borderRadius: 6, alignItems: 'center', marginBottom: 32 },
-  logoutButtonText: { color: '#c0392b', fontWeight: '600' },
+  error: { color: semanticColors.danger, marginTop: 8 },
+  success: { color: semanticColors.success, marginTop: 8 },
+  logoutButton: { marginBottom: 32 },
   staffRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -568,8 +611,7 @@ const styles = StyleSheet.create({
   staffName: { fontSize: 14, fontWeight: '600' },
   staffMeta: { fontSize: 12, opacity: 0.6, marginTop: 2 },
   staffActions: { flexDirection: 'row', gap: 8 },
-  staffToggleButton: { borderWidth: 1, borderColor: '#c0392b', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
-  staffToggleButtonText: { color: '#c0392b', fontSize: 12, fontWeight: '600' },
+  staffToggleButton: { paddingHorizontal: 10, paddingVertical: 6 },
   staffInviteHeading: { marginTop: 12, marginBottom: 8 },
   inviteResultCard: { borderRadius: 8, padding: 12, marginBottom: 12 },
   inviteResultTitle: { fontSize: 13, fontWeight: '600', marginBottom: 6 },
@@ -578,8 +620,4 @@ const styles = StyleSheet.create({
   inviteResultDismiss: { marginTop: 8, alignSelf: 'flex-start' },
   inviteResultDismissText: { color: '#007aff', fontSize: 12, fontWeight: '600' },
   roleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
-  roleChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#ccc' },
-  roleChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
-  roleChipText: { fontSize: 12, fontWeight: '600', opacity: 0.7 },
-  roleChipTextActive: { color: '#fff', opacity: 1 },
 });

@@ -73,13 +73,15 @@ public static class AuthEndpoints
             var user = await db.BusinessUsers.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == request.Email, ct);
             if (user is null || !user.IsActive)
             {
-                return Results.Unauthorized();
+                // Deliberately the same message regardless of which check failed (no account,
+                // deactivated staff, wrong password) — don't reveal whether the email exists at all.
+                return Results.Json(new { message = "Invalid email or password." }, statusCode: StatusCodes.Status401Unauthorized);
             }
 
             var verification = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
             if (verification == PasswordVerificationResult.Failed)
             {
-                return Results.Unauthorized();
+                return Results.Json(new { message = "Invalid email or password." }, statusCode: StatusCodes.Status401Unauthorized);
             }
 
             return Results.Ok(IssueToken(user, jwtOptions.Value));

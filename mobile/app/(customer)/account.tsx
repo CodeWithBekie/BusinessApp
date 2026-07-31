@@ -1,7 +1,11 @@
-import { Pressable, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
+import { Button } from '@/components/ui/Button';
+import { Section } from '@/components/ui/Section';
+import { spacing, typography } from '@/constants/theme';
 import { useAuth } from '@/src/auth/AuthContext';
+import { colorFor, initialsFor } from '@/src/marketplace/avatar';
 
 export default function CustomerAccountScreen() {
   const { session, logout } = useAuth();
@@ -12,25 +16,30 @@ export default function CustomerAccountScreen() {
       <Text style={styles.title}>Account</Text>
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
       {customerSession && (
-        <View style={styles.card} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
-          {customerSession.name && <Text style={styles.name}>{customerSession.name}</Text>}
-          <Text style={styles.email}>{customerSession.email}</Text>
-        </View>
+        <Section title="Profile">
+          <View style={styles.profileRow} lightColor="transparent" darkColor="transparent">
+            <View style={[styles.avatar, { backgroundColor: colorFor(customerSession.name ?? customerSession.email) }]}>
+              <Text style={styles.avatarText}>{initialsFor(customerSession.name ?? customerSession.email)}</Text>
+            </View>
+            <View lightColor="transparent" darkColor="transparent">
+              {customerSession.name && <Text style={styles.name}>{customerSession.name}</Text>}
+              <Text style={styles.email}>{customerSession.email}</Text>
+            </View>
+          </View>
+        </Section>
       )}
-      <Pressable style={styles.logoutButton} onPress={logout}>
-        <Text style={styles.logoutButtonText}>Log out</Text>
-      </Pressable>
+      <Button label="Log out" variant="destructive" onPress={logout} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 24, paddingHorizontal: 16 },
-  title: { fontSize: 20, fontWeight: 'bold' },
+  title: typography.title,
   separator: { marginTop: 12, marginBottom: 12, height: 1, width: '100%' },
-  card: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 16, marginBottom: 24 },
+  profileRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  avatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: '#fff', fontSize: 17, fontWeight: '700' },
   name: { fontSize: 16, fontWeight: '600' },
   email: { fontSize: 13, opacity: 0.6, marginTop: 2 },
-  logoutButton: { borderWidth: 1, borderColor: '#c0392b', paddingVertical: 10, borderRadius: 6, alignItems: 'center' },
-  logoutButtonText: { color: '#c0392b', fontWeight: '600' },
 });

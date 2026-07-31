@@ -19,15 +19,19 @@ public record MarketplaceOrderSummary(
 public record MarketplaceOrderDetail(
     Guid OrderId, Guid BusinessId, string BusinessName, OrderStatus Status,
     decimal TotalAmount, decimal VatAmount, int? InvoiceNumber, string Currency,
-    IReadOnlyList<InvoiceLineItem> Items, OrderPaymentSummary? Payment,
+    IReadOnlyList<InvoiceLineItem> Items, OrderPaymentSummary? Payment, OrderDeliverySummary? Delivery,
     bool CanCancelDirectly, bool CanRequestCancellation, bool IsPaynowConnected,
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 
 public record EcoCashPaymentResult(string PaymentReference, string? Instructions, string? PollUrl);
 
 // Customer-facing marketplace capabilities — kept separate from ICatalogTools/IOrderTools (which
-// stay business-owner/staff-facing) rather than bloating those interfaces further. Not exposed to
-// the AI assistant/MCP; these are REST-only (MarketplaceEndpoints.cs).
+// stay business-owner/staff-facing) rather than bloating those interfaces further. Exposed both as
+// REST (MarketplaceEndpoints.cs, the human-driven checkout UI) and as MCP tools
+// (MarketplaceMcpTools.cs, the customer-facing AI Assistant) — both hosts call this same
+// implementation, "one function, multiple entry points" as with every other capability in this
+// system. SubmitPaymentProofAsync is the one exception, staying REST-only: there's no reasonable
+// way for a chat model to attach binary image bytes from a free-text conversation.
 public interface IMarketplaceTools
 {
     Task<IReadOnlyList<PublicBusinessSummary>> ListPubliclyListedBusinessesAsync(CancellationToken cancellationToken = default);

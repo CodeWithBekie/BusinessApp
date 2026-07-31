@@ -2,9 +2,14 @@ import { Stack, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Chip } from '@/components/ui/Chip';
 import { apiClient, CatalogItem, CatalogItemType, PurchaseOrderDetail, PurchaseOrderLineItem, Supplier } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { formatMoney } from '@/src/common/format';
+import { semanticColors, spacing, typography } from '@/constants/theme';
 import { useIsOnline } from '@/src/offline/networkStatus';
 
 const ITEM_TYPES: CatalogItemType[] = ['Stock', 'TimeBased', 'Quote'];
@@ -36,10 +41,10 @@ function useInputStyle() {
 function SupplierRow({ supplier, onSelect }: { supplier: Supplier; onSelect: () => void }) {
   return (
     <Pressable onPress={onSelect} style={({ pressed }) => [styles.pickerRow, pressed && styles.pickerRowPressed]}>
-      <View style={styles.pickerRowInner} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+      <Card style={styles.pickerRowInner}>
         <Text style={styles.pickerName}>{supplier.name}</Text>
         <Text style={styles.pickerAdd}>Select</Text>
-      </View>
+      </Card>
     </Pressable>
   );
 }
@@ -47,7 +52,7 @@ function SupplierRow({ supplier, onSelect }: { supplier: Supplier; onSelect: () 
 function ItemPickerRow({ item, onAdd }: { item: CatalogItem; onAdd: () => void }) {
   return (
     <Pressable onPress={onAdd} style={({ pressed }) => [styles.pickerRow, pressed && styles.pickerRowPressed]}>
-      <View style={styles.pickerRowInner} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+      <Card style={styles.pickerRowInner}>
         <View style={styles.pickerRowText} lightColor="transparent" darkColor="transparent">
           <Text style={styles.pickerName} numberOfLines={1}>
             {item.name}
@@ -58,7 +63,7 @@ function ItemPickerRow({ item, onAdd }: { item: CatalogItem; onAdd: () => void }
           </Text>
         </View>
         <Text style={styles.pickerAdd}>+ Add</Text>
-      </View>
+      </Card>
     </Pressable>
   );
 }
@@ -81,17 +86,13 @@ function CartRow({
   const inputStyle = useInputStyle();
   const name = line.kind === 'existing' ? line.item.name : line.name;
   return (
-    <View style={styles.cartRow} lightColor="transparent" darkColor="transparent">
+    <Card style={styles.cartRow}>
       <View style={styles.cartRowTop} lightColor="transparent" darkColor="transparent">
         <View style={styles.cartRowTitle} lightColor="transparent" darkColor="transparent">
           <Text style={styles.cartName} numberOfLines={1}>
             {name}
           </Text>
-          {line.kind === 'new' && (
-            <View style={styles.newBadge}>
-              <Text style={styles.newBadgeText}>New</Text>
-            </View>
-          )}
+          {line.kind === 'new' && <Badge label="New" color={semanticColors.warning} />}
         </View>
         <Pressable onPress={onRemove}>
           <Text style={styles.removeButtonText}>Remove</Text>
@@ -111,7 +112,7 @@ function CartRow({
         <TextInput style={[inputStyle, styles.costInput]} value={line.unitCost} onChangeText={onCostChange} keyboardType="decimal-pad" />
         <Text style={styles.cartSubtotal}>{formatMoney((Number(line.unitCost) || 0) * line.quantity, currency)}</Text>
       </View>
-    </View>
+    </Card>
   );
 }
 
@@ -274,9 +275,7 @@ export default function PurchaseOrderNewScreen() {
         <View style={styles.successBanner} lightColor="#e8f5e9" darkColor="rgba(46,125,50,0.2)">
           <Text style={styles.successTitle}>Purchase order created — {formatMoney(result.totalAmount, result.currency)}</Text>
           <Text style={styles.successMeta}>From: {result.supplierName}</Text>
-          <Pressable style={styles.successDismiss} onPress={() => router.back()}>
-            <Text style={styles.successDismissText}>Done</Text>
-          </Pressable>
+          <Button label="Done" variant="success" style={styles.successDismiss} onPress={() => router.back()} />
         </View>
       )}
 
@@ -289,12 +288,10 @@ export default function PurchaseOrderNewScreen() {
             <>
               <Text style={styles.label}>Supplier</Text>
               {selectedSupplier ? (
-                <View style={styles.selectedCard} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+                <Card style={styles.selectedCard}>
                   <Text style={styles.selectedName}>{selectedSupplier.name}</Text>
-                  <Pressable style={styles.changeButton} onPress={() => setSelectedSupplier(null)}>
-                    <Text style={styles.changeButtonText}>Change</Text>
-                  </Pressable>
-                </View>
+                  <Button label="Change" style={styles.changeButton} onPress={() => setSelectedSupplier(null)} />
+                </Card>
               ) : (
                 <>
                   <TextInput style={inputStyle} placeholder="Search suppliers…" value={supplierSearch} onChangeText={setSupplierSearch} />
@@ -312,27 +309,18 @@ export default function PurchaseOrderNewScreen() {
                 <>
                   <Text style={styles.label}>Currency (for new items)</Text>
                   <View style={styles.currencyRow} lightColor="transparent" darkColor="transparent">
-                    {catalogCurrencies.map((cur) => {
-                      const active = !showCustomCurrency && cur === selectedCurrency;
-                      return (
-                        <Pressable
-                          key={cur}
-                          onPress={() => {
-                            setShowCustomCurrency(false);
-                            setSelectedCurrency(cur);
-                          }}
-                          style={[styles.currencyChip, active && styles.currencyChipActive]}
-                        >
-                          <Text style={[styles.currencyChipText, active && styles.currencyChipTextActive]}>{cur}</Text>
-                        </Pressable>
-                      );
-                    })}
-                    <Pressable
-                      onPress={() => setShowCustomCurrency(true)}
-                      style={[styles.currencyChip, showCustomCurrency && styles.currencyChipActive]}
-                    >
-                      <Text style={[styles.currencyChipText, showCustomCurrency && styles.currencyChipTextActive]}>Other…</Text>
-                    </Pressable>
+                    {catalogCurrencies.map((cur) => (
+                      <Chip
+                        key={cur}
+                        label={cur}
+                        active={!showCustomCurrency && cur === selectedCurrency}
+                        onPress={() => {
+                          setShowCustomCurrency(false);
+                          setSelectedCurrency(cur);
+                        }}
+                      />
+                    ))}
+                    <Chip label="Other…" active={showCustomCurrency} onPress={() => setShowCustomCurrency(true)} />
                   </View>
                   {showCustomCurrency && (
                     <TextInput
@@ -363,32 +351,19 @@ export default function PurchaseOrderNewScreen() {
               )}
 
               {showNewItemForm && (
-                <View style={styles.newItemForm} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+                <Card style={styles.newItemForm}>
                   <TextInput style={inputStyle} placeholder="Item name" value={newItemName} onChangeText={setNewItemName} />
                   <View style={styles.newItemTypeRow} lightColor="transparent" darkColor="transparent">
-                    {ITEM_TYPES.map((t) => {
-                      const active = t === newItemType;
-                      return (
-                        <Pressable
-                          key={t}
-                          onPress={() => setNewItemType(t)}
-                          style={[styles.currencyChip, active && styles.currencyChipActive]}
-                        >
-                          <Text style={[styles.currencyChipText, active && styles.currencyChipTextActive]}>{t}</Text>
-                        </Pressable>
-                      );
-                    })}
+                    {ITEM_TYPES.map((t) => (
+                      <Chip key={t} label={t} active={t === newItemType} onPress={() => setNewItemType(t)} />
+                    ))}
                   </View>
                   <TextInput style={inputStyle} placeholder="Unit (e.g. each, bag)" value={newItemUnit} onChangeText={setNewItemUnit} />
                   <View style={styles.newItemActions} lightColor="transparent" darkColor="transparent">
-                    <Pressable style={styles.modalCancelButtonWide} onPress={() => setShowNewItemForm(false)}>
-                      <Text style={styles.modalCancelText}>Cancel</Text>
-                    </Pressable>
-                    <Pressable style={[styles.button, styles.newItemAddButton]} onPress={addNewItem}>
-                      <Text style={styles.buttonText}>Add to cart</Text>
-                    </Pressable>
+                    <Button label="Cancel" variant="secondary" style={styles.flexButton} onPress={() => setShowNewItemForm(false)} />
+                    <Button label="Add to cart" style={styles.flexButton} onPress={addNewItem} />
                   </View>
-                </View>
+                </Card>
               )}
 
               <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
@@ -418,13 +393,12 @@ export default function PurchaseOrderNewScreen() {
                 {saveError && <Text style={styles.error}>{saveError}</Text>}
                 {!isOnline && <Text style={styles.error}>You're offline — connect to create this purchase order.</Text>}
 
-                <Pressable
-                  style={[styles.button, (saving || cartLines.length === 0 || !selectedSupplier || !isOnline) && styles.buttonDisabled]}
+                <Button
+                  label={saving ? 'Creating…' : 'Create purchase order'}
+                  style={styles.createButton}
                   disabled={saving || cartLines.length === 0 || !selectedSupplier || !isOnline}
                   onPress={createPurchaseOrder}
-                >
-                  <Text style={styles.buttonText}>{saving ? 'Creating…' : 'Create purchase order'}</Text>
-                </Pressable>
+                />
               </ScrollView>
             </>
           )}
@@ -437,22 +411,19 @@ export default function PurchaseOrderNewScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 16 },
   loading: { marginTop: 24 },
-  error: { color: '#c0392b', marginTop: 8, marginBottom: 8 },
+  error: { color: semanticColors.danger, marginTop: 8, marginBottom: 8 },
   empty: { opacity: 0.6, marginTop: 8, marginBottom: 8 },
-  label: { fontSize: 13, fontWeight: '600', opacity: 0.7, marginTop: 16, marginBottom: 6 },
-  sectionTitle: { fontSize: 15, fontWeight: '700', marginBottom: 8 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8 },
+  label: { fontSize: 13, fontWeight: '600', opacity: 0.7, marginTop: spacing.lg, marginBottom: spacing.xs + 2 },
+  sectionTitle: { ...typography.bodyStrong, fontSize: 15, marginBottom: spacing.sm },
+  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
   inputLight: { color: '#000' },
   pickerList: { maxHeight: 160, marginTop: 8 },
-  pickerRow: { marginBottom: 8, borderRadius: 8 },
+  pickerRow: { marginBottom: spacing.sm },
   pickerRowPressed: { opacity: 0.7 },
   pickerRowInner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
     padding: 10,
   },
   pickerRowText: { flexShrink: 1, marginRight: 8 },
@@ -461,7 +432,7 @@ const styles = StyleSheet.create({
   pickerAdd: { fontSize: 13, fontWeight: '700', color: '#007aff' },
   separator: { marginTop: 12, marginBottom: 12, height: 1, width: '100%' },
   cartSection: { flex: 1 },
-  cartRow: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 10 },
+  cartRow: { padding: 10, marginBottom: spacing.sm + 2 },
   cartRowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   cartRowTitle: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   cartRowBottom: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
@@ -473,8 +444,7 @@ const styles = StyleSheet.create({
   stepperButton: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: '#ccc', alignItems: 'center', justifyContent: 'center' },
   stepperButtonText: { fontSize: 14, fontWeight: '700' },
   stepperValue: { fontSize: 13, fontWeight: '600', minWidth: 16, textAlign: 'center' },
-  removeButton: { paddingHorizontal: 4 },
-  removeButtonText: { fontSize: 12, color: '#c0392b', fontWeight: '600' },
+  removeButtonText: { fontSize: 12, color: semanticColors.danger, fontWeight: '600' },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#ccc' },
   totalLabel: { fontSize: 15, fontWeight: '700' },
   totalValue: { fontSize: 17, fontWeight: '800' },
@@ -482,35 +452,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    padding: 12,
   },
   selectedName: { fontSize: 14, fontWeight: '700' },
-  changeButton: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: '#007aff' },
-  changeButtonText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  button: { backgroundColor: '#007aff', paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 24, marginBottom: 8 },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  changeButton: { paddingHorizontal: 12, paddingVertical: 6 },
+  createButton: { marginTop: spacing.xl, marginBottom: spacing.sm },
   successBanner: { borderRadius: 10, padding: 16, marginTop: 16 },
   successTitle: { fontSize: 16, fontWeight: '700' },
   successMeta: { fontSize: 13, opacity: 0.7, marginTop: 4 },
-  successDismiss: { backgroundColor: '#2e7d32', paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginTop: 16 },
-  successDismissText: { color: '#fff', fontWeight: '600' },
-  currencyRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 8 },
-  currencyChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#ccc' },
-  currencyChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
-  currencyChipText: { fontSize: 13, fontWeight: '600', opacity: 0.7 },
-  currencyChipTextActive: { color: '#fff', opacity: 1 },
-  newBadge: { backgroundColor: '#f2994a', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  newBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  successDismiss: { marginTop: 16 },
+  currencyRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', marginBottom: spacing.sm },
   newItemToggle: { paddingVertical: 10, marginTop: 4 },
   newItemToggleText: { color: '#007aff', fontWeight: '600', fontSize: 13 },
-  newItemForm: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginTop: 8, gap: 8 },
-  newItemTypeRow: { flexDirection: 'row', gap: 8 },
+  newItemForm: { marginTop: 8, gap: 8 },
+  newItemTypeRow: { flexDirection: 'row', gap: spacing.sm },
   newItemActions: { flexDirection: 'row', gap: 12, marginTop: 4 },
-  newItemAddButton: { flex: 1, marginTop: 0 },
-  modalCancelButtonWide: { flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ccc' },
-  modalCancelText: { fontWeight: '600' },
+  flexButton: { flex: 1 },
 });

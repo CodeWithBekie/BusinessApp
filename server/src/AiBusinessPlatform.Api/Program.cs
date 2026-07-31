@@ -1,4 +1,5 @@
 using AiBusinessPlatform.Api.Assistant;
+using AiBusinessPlatform.Api.DevTools;
 using AiBusinessPlatform.Api.Endpoints;
 using AiBusinessPlatform.Api.Orchestrator;
 using AiBusinessPlatform.Api.Payments;
@@ -30,6 +31,15 @@ QuestPDF.Settings.License = LicenseType.Community;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHttpContextAccessor();
+
+// Dev-only: starting this Api also brings up the Mcp server, the mobile Expo web preview, and the
+// MCP Inspector as child processes (and stops them when the Api stops) — see
+// DevOrchestratorHostedService's own remarks for why this is Development-only and skips ports that
+// are already bound.
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddHostedService<DevOrchestratorHostedService>();
+}
 
 // Enums (order/approval/catalog-item/WhatsApp-connection status, etc.) serialize as readable
 // names instead of raw ints — the only consumer of this Api's JSON today is the mobile dashboard.
@@ -163,6 +173,12 @@ builder.Services.AddScoped<IWhatsAppMessageService, WhatsAppMessageService>();
 builder.Services.Configure<PaynowOptions>(builder.Configuration.GetSection(PaynowOptions.SectionName));
 builder.Services.AddHttpClient<IPaynowClient, PaynowClient>().AddStandardResilienceHandler();
 
+// Real EcoCash Instant Payment sandbox calls — a genuine alternate gateway alongside Paynow above,
+// not a replacement (PaymentTools.CreatePaymentRequestAsync checks this connection first). No
+// AddHttpClient here — EcoCashClient shells out to curl instead (see its own remarks for why).
+builder.Services.Configure<EcoCashOptions>(builder.Configuration.GetSection(EcoCashOptions.SectionName));
+builder.Services.AddScoped<IEcoCashClient, EcoCashClient>();
+
 builder.Services.AddHostedService<WhatsAppOrchestratorConsumer>();
 builder.Services.AddHostedService<PaymentWebhookConsumer>();
 builder.Services.AddHostedService<WhatsAppRetryHostedService>();
@@ -200,5 +216,6 @@ app.MapStaffEndpoints();
 app.MapAccountingEndpoints();
 app.MapMarketplaceEndpoints();
 app.MapAssistantEndpoints();
+app.MapCustomerAssistantEndpoints();
 
 app.Run();

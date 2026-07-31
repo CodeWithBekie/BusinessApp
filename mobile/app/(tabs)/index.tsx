@@ -2,24 +2,21 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Chip } from '@/components/ui/Chip';
 import { apiClient, CatalogItem } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
+import { radius, semanticColors, spacing, typography } from '@/constants/theme';
 import { CATALOG_ITEM_TYPE_COLORS, CATALOG_ITEM_TYPE_LABELS, formatMoney } from '@/src/catalog/catalogItemType';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
 import { useHasPermission } from '@/src/auth/permissions';
 
-type FilterValue = 'All' | 'Active' | 'Inactive';
+type FilterValue = 'All' | 'Active' | 'Inactive' | 'Low stock';
 
-const FILTERS: readonly FilterValue[] = ['All', 'Active', 'Inactive'];
-
-function TypeBadge({ item }: { item: CatalogItem }) {
-  return (
-    <View style={[styles.badge, { backgroundColor: CATALOG_ITEM_TYPE_COLORS[item.itemType] }]}>
-      <Text style={styles.badgeText}>{CATALOG_ITEM_TYPE_LABELS[item.itemType]}</Text>
-    </View>
-  );
-}
+const FILTERS: readonly FilterValue[] = ['All', 'Active', 'Inactive', 'Low stock'];
 
 function CatalogThumbnail({ item }: { item: CatalogItem }) {
   const [failed, setFailed] = useState(false);
@@ -42,27 +39,34 @@ function CatalogThumbnail({ item }: { item: CatalogItem }) {
 function CatalogCard({ item, onPress }: { item: CatalogItem; onPress?: () => void }) {
   const colorScheme = useColorScheme();
   return (
-    <Pressable onPress={onPress} disabled={!onPress} style={({ pressed }) => [styles.card, pressed && onPress && styles.cardPressed]}>
-      <View style={[styles.cardInner, !item.active && styles.cardInactive]} lightColor="#fff" darkColor="rgba(255,255,255,0.05)">
+    <Pressable onPress={onPress} disabled={!onPress} style={({ pressed }) => [styles.cardWrap, pressed && onPress && styles.cardPressed]}>
+      <Card style={[styles.cardInner, !item.active && styles.cardInactive]}>
         <CatalogThumbnail item={item} />
         <View style={styles.cardContent} lightColor="transparent" darkColor="transparent">
           <View style={styles.cardTopRow} lightColor="transparent" darkColor="transparent">
             <Text style={styles.itemName} numberOfLines={1}>
               {item.name}
             </Text>
-            <TypeBadge item={item} />
+            <Badge label={CATALOG_ITEM_TYPE_LABELS[item.itemType]} color={CATALOG_ITEM_TYPE_COLORS[item.itemType]} />
           </View>
           <View style={styles.cardBottomRow} lightColor="transparent" darkColor="transparent">
             <Text style={styles.price}>
               {formatMoney(item.price, item.currency)} / {item.unit}
             </Text>
-            <Text style={[styles.meta, colorScheme === 'dark' ? styles.metaDark : styles.metaLight]}>
+            <Text
+              style={[
+                styles.meta,
+                colorScheme === 'dark' ? styles.metaDark : styles.metaLight,
+                item.itemType === 'Stock' && (item.stockQuantity ?? 0) <= 0 && styles.metaOutOfStock,
+                item.itemType === 'Stock' && (item.stockQuantity ?? 0) > 0 && item.isLowStock && styles.metaLowStock,
+              ]}
+            >
               {item.itemType === 'Stock' ? `${item.stockQuantity ?? 0} in stock` : 'No stock tracking'}
               {!item.active ? ' · Inactive' : ''}
             </Text>
           </View>
         </View>
-      </View>
+      </Card>
     </Pressable>
   );
 }
@@ -70,14 +74,9 @@ function CatalogCard({ item, onPress }: { item: CatalogItem; onPress?: () => voi
 function FilterTabs({ value, onChange }: { value: FilterValue; onChange: (value: FilterValue) => void }) {
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={styles.filterRow}>
-      {FILTERS.map((filter) => {
-        const active = filter === value;
-        return (
-          <Pressable key={filter} onPress={() => onChange(filter)} style={[styles.filterChip, active && styles.filterChipActive]}>
-            <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{filter}</Text>
-          </Pressable>
-        );
-      })}
+      {FILTERS.map((filter) => (
+        <Chip key={filter} label={filter} active={filter === value} onPress={() => onChange(filter)} />
+      ))}
     </ScrollView>
   );
 }
@@ -98,6 +97,7 @@ export default function CatalogScreen() {
   const visibleItems = (items ?? []).filter((item) => {
     if (filter === 'Active') return item.active;
     if (filter === 'Inactive') return !item.active;
+    if (filter === 'Low stock') return item.isLowStock;
     return true;
   });
 
@@ -106,12 +106,7 @@ export default function CatalogScreen() {
       <View style={styles.headerRow} lightColor="transparent" darkColor="transparent">
         <Text style={styles.title}>Catalog</Text>
         {canManageCatalog && (
-          <Pressable
-            style={styles.addButton}
-            onPress={() => router.push({ pathname: '/catalog-item/[id]', params: { id: 'new' } })}
-          >
-            <Text style={styles.addButtonText}>+ Add item</Text>
-          </Pressable>
+          <Button label="+ Add item" style={styles.addButton} onPress={() => router.push({ pathname: '/catalog-item/[id]', params: { id: 'new' } })} />
         )}
       </View>
       <FilterTabs value={filter} onChange={setFilter} />
@@ -142,43 +137,32 @@ export default function CatalogScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 24, paddingHorizontal: 16 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  title: { fontSize: 20, fontWeight: 'bold' },
-  addButton: { backgroundColor: '#007aff', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
-  addButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
+  title: { ...typography.title },
+  addButton: { paddingHorizontal: spacing.md + 2, paddingVertical: spacing.sm },
   filterScroll: { flexGrow: 0 },
-  filterRow: { gap: 8, paddingRight: 8, paddingBottom: 4 },
-  filterChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#ccc',
-  },
-  filterChipActive: { backgroundColor: '#007aff', borderColor: '#007aff' },
-  filterChipText: { fontSize: 13, fontWeight: '500', opacity: 0.7 },
-  filterChipTextActive: { color: '#fff', opacity: 1 },
+  filterRow: { gap: spacing.sm, paddingRight: spacing.sm, paddingBottom: 4 },
   separator: { marginTop: 12, marginBottom: 12, height: 1, width: '100%' },
   loading: { marginTop: 24 },
   empty: { opacity: 0.6, marginTop: 8 },
-  error: { color: '#c0392b', marginBottom: 12 },
+  error: { color: semanticColors.danger, marginBottom: 12 },
   cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
   list: { width: '100%' },
-  card: { marginBottom: 12, borderRadius: 10 },
+  cardWrap: { marginBottom: spacing.md },
   cardPressed: { opacity: 0.7 },
-  cardInner: { flexDirection: 'row', gap: 12, borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 14 },
+  cardInner: { flexDirection: 'row', gap: spacing.md },
   cardInactive: { opacity: 0.55 },
   cardContent: { flex: 1 },
-  thumbnail: { width: 48, height: 48, borderRadius: 8 },
+  thumbnail: { width: 48, height: 48, borderRadius: radius.sm },
   thumbnailPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   thumbnailPlaceholderText: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  cardTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  itemName: { fontSize: 15, fontWeight: '600', flexShrink: 1 },
-  cardBottomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 },
+  cardTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  itemName: { ...typography.bodyStrong, flexShrink: 1 },
+  cardBottomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm + 2 },
   price: { fontSize: 16, fontWeight: '700' },
-  meta: { fontSize: 12 },
+  meta: { ...typography.meta },
   metaLight: { color: '#666' },
   metaDark: { color: '#aaa' },
-  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  metaLowStock: { color: semanticColors.warning, fontWeight: '600' },
+  metaOutOfStock: { color: semanticColors.danger, fontWeight: '600' },
 });

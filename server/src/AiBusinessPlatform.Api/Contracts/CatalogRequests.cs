@@ -9,7 +9,8 @@ public record CreateCatalogItemRequest(
     string? Currency,
     int? StockQuantity,
     string? Unit,
-    string? Code);
+    string? Code,
+    int? LowStockThreshold);
 
 // PATCH semantics — every field is optional; only supplied fields are changed. ItemType is
 // deliberately not patchable (switching Stock <-> TimeBased/Quote after items/reservations exist
@@ -21,4 +22,5 @@ public record UpdateCatalogItemRequest(
     int? StockQuantity,
     string? Unit,
     bool? Active,
-    string? Code);
+    string? Code,
+    int? LowStockThreshold);
