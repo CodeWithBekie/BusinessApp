@@ -1,11 +1,13 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
 import { Section } from '@/components/ui/Section';
+import { StepProgress } from '@/components/ui/StepProgress';
 import { apiClient, PosPaymentMethod, PurchaseOrderDetail, ReceivedLinePrice } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -15,8 +17,10 @@ import { downloadAndShareDocument } from '@/src/documents/downloadAndShare';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
 import { useIsOnline } from '@/src/offline/networkStatus';
 import { useHasPermission } from '@/src/auth/permissions';
+import { useToast } from '@/src/ui/ToastContext';
 
 const SUPPLIER_PAYMENT_METHODS: readonly PosPaymentMethod[] = ['Cash', 'EcoCash', 'Bank', 'Other'];
+const PO_STEPS = ['Draft', 'Ordered', 'Received'] as const;
 
 const PO_STATUS_COLORS: Record<string, string> = {
   Draft: semanticColors.neutral,
@@ -32,6 +36,7 @@ export default function PurchaseOrderDetailScreen() {
   const isOnline = useIsOnline();
   const canManageSuppliers = useHasPermission('ManageSuppliers');
   const metaStyle = colorScheme === 'dark' ? styles.metaDark : styles.metaLight;
+  const { show: showToast } = useToast();
   const fetchPo = useCallback(() => apiClient.getPurchaseOrder(id!), [id]);
   const { data: po, error, isFromCache, reload: load } = useCachedFetch<PurchaseOrderDetail>(`purchaseOrder:${id}`, fetchPo);
   const [receiving, setReceiving] = useState(false);
@@ -76,14 +81,17 @@ export default function PurchaseOrderDetailScreen() {
         return { purchaseOrderItemId: item.id, salePrice: parsed };
       });
       await apiClient.receivePurchaseOrder(po.id, linePrices);
+      showToast('Purchase order marked as received.', 'success');
       setShowReceiveForm(false);
       load();
     } catch (err) {
-      setActionError((err as Error).message);
+      const message = (err as Error).message;
+      setActionError(message);
+      showToast(message, 'error');
     } finally {
       setReceiving(false);
     }
-  }, [po, receivePrices, load]);
+  }, [po, receivePrices, load, showToast]);
 
   const recordPayment = useCallback(async () => {
     if (!po) return;
@@ -96,15 +104,18 @@ export default function PurchaseOrderDetailScreen() {
     setRecordingPayment(true);
     try {
       await apiClient.recordSupplierPayment(po.id, parsed, paymentProvider);
+      showToast('Payment to supplier recorded.', 'success');
       setShowPaymentForm(false);
       setPaymentAmount('');
       load();
     } catch (err) {
-      setPaymentError((err as Error).message);
+      const message = (err as Error).message;
+      setPaymentError(message);
+      showToast(message, 'error');
     } finally {
       setRecordingPayment(false);
     }
-  }, [po, paymentAmount, paymentProvider, load]);
+  }, [po, paymentAmount, paymentProvider, load, showToast]);
 
   const downloadDocument = useCallback(async () => {
     if (!po) return;
@@ -126,7 +137,7 @@ export default function PurchaseOrderDetailScreen() {
       {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
       {!error && po === null && <ActivityIndicator style={styles.loading} />}
       {!error && po !== null && (
-        <>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.headerRow} lightColor="transparent" darkColor="transparent">
             <Badge label={po.status} color={PO_STATUS_COLORS[po.status] ?? semanticColors.neutral} />
             <Text style={[styles.updatedAt, metaStyle]}>Updated {new Date(po.updatedAt).toLocaleString()}</Text>
@@ -137,13 +148,19 @@ export default function PurchaseOrderDetailScreen() {
             Paid {formatMoney(po.amountPaid, po.currency)} · Owed {formatMoney(po.amountOwed, po.currency)}
           </Text>
 
+          {po.status !== 'Cancelled' && (
+            <View style={styles.progressWrap} lightColor="transparent" darkColor="transparent">
+              <StepProgress steps={PO_STEPS} currentIndex={PO_STEPS.indexOf(po.status as (typeof PO_STEPS)[number])} />
+            </View>
+          )}
+
           <Section title="Supplier">
             <Text style={styles.rowPrimary}>{po.supplierName}</Text>
           </Section>
 
           <Section title={`Items (${po.items.length})`}>
             {po.items.map((item) => (
-              <View key={item.id} style={styles.itemBlock} lightColor="transparent" darkColor="transparent">
+              <Card key={item.id} style={styles.itemBlock}>
                 <View style={styles.itemRow} lightColor="transparent" darkColor="transparent">
                   <View style={styles.itemNameCol} lightColor="transparent" darkColor="transparent">
                     <View style={styles.itemNameRow} lightColor="transparent" darkColor="transparent">
@@ -174,7 +191,7 @@ export default function PurchaseOrderDetailScreen() {
                     />
                   </View>
                 )}
-              </View>
+              </Card>
             ))}
           </Section>
 
@@ -251,14 +268,15 @@ export default function PurchaseOrderDetailScreen() {
               />
             </View>
           )}
-        </>
+        </ScrollView>
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 32 },
+  container: { flex: 1, paddingTop: 16 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 32 },
   loading: { marginTop: 40 },
   error: { color: semanticColors.danger, marginBottom: 12 },
   cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
@@ -267,11 +285,12 @@ const styles = StyleSheet.create({
   updatedAt: { fontSize: 12 },
   total: { fontSize: 30, fontWeight: '700', marginBottom: 4 },
   amountOwedNote: { fontSize: 13, marginBottom: 16 },
+  progressWrap: { marginBottom: 16 },
   paymentForm: { marginTop: 12, marginBottom: 4 },
   providerRow: { flexDirection: 'row', gap: spacing.sm, marginTop: 10, flexWrap: 'wrap' },
   rowPrimary: { fontSize: 15, fontWeight: '600' },
   rowSecondary: { fontSize: 13, marginTop: 2 },
-  itemBlock: { marginBottom: 12 },
+  itemBlock: { marginBottom: 10 },
   itemRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   itemNameCol: { flexShrink: 1, paddingRight: 12 },
   itemNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },

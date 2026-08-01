@@ -34,7 +34,7 @@ public class PurchaseOrderTools(
             .Select(x => new PurchaseOrderSummary(
                 x.po.Id, x.s.Id, x.s.Name, x.po.Status, x.po.TotalAmount, x.po.AmountPaid, x.po.TotalAmount - x.po.AmountPaid, x.po.Currency,
                 dbContext.PurchaseOrderItems.Count(i => i.PurchaseOrderId == x.po.Id),
-                x.po.CreatedAt, x.po.UpdatedAt, x.po.ReceivedAt))
+                x.po.CreatedAt, x.po.UpdatedAt, x.po.ReceivedAt, x.po.ExpectedDeliveryDate))
             .ToListAsync(cancellationToken);
     }
 
@@ -66,11 +66,11 @@ public class PurchaseOrderTools(
 
         return new PurchaseOrderDetail(
             po.Id, po.SupplierId, supplier?.Name ?? "Unknown supplier", po.Status, po.TotalAmount, po.AmountPaid, po.TotalAmount - po.AmountPaid, po.Currency, items,
-            po.CreatedAt, po.UpdatedAt, po.ReceivedAt);
+            po.CreatedAt, po.UpdatedAt, po.ReceivedAt, po.ExpectedDeliveryDate);
     }
 
     public async Task<PurchaseOrderDetail> CreatePurchaseOrderAsync(
-        Guid businessId, Guid supplierId, IReadOnlyList<PurchaseOrderLineItem> items, string? currency, CancellationToken cancellationToken = default)
+        Guid businessId, Guid supplierId, IReadOnlyList<PurchaseOrderLineItem> items, string? currency, DateTimeOffset? expectedDeliveryDate, CancellationToken cancellationToken = default)
     {
         if (businessId != tenantProvider.CurrentBusinessId)
         {
@@ -144,7 +144,8 @@ public class PurchaseOrderTools(
             Status = PurchaseOrderStatus.Ordered,
             Currency = poCurrency,
             CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
+            UpdatedAt = DateTimeOffset.UtcNow,
+            ExpectedDeliveryDate = expectedDeliveryDate
         };
         dbContext.PurchaseOrders.Add(purchaseOrder);
 

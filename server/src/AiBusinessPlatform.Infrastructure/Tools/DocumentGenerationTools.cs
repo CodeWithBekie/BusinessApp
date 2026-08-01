@@ -1,5 +1,6 @@
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
+using AiBusinessPlatform.Domain;
 using AiBusinessPlatform.Domain.Entities;
 using AiBusinessPlatform.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +16,18 @@ public class DocumentGenerationTools(
     IOrderTools orderTools,
     IPurchaseOrderTools purchaseOrderTools) : IDocumentGenerationTools
 {
+    // Shared brand palette, matching mobile/constants/theme.ts (tint blue + semantic colors) so a
+    // printed document reads as the same product as the app, not a bolted-on afterthought.
+    private static readonly Color BrandColor = Color.FromHex("#007AFF");
+    private static readonly Color BrandColorSoft = Color.FromHex("#E6F2FF");
+    private static readonly Color TextColor = Color.FromHex("#1C1C1E");
+    private static readonly Color MutedColor = Color.FromHex("#6B7280");
+    private static readonly Color BorderColor = Color.FromHex("#E2E8F0");
+    private static readonly Color SuccessColor = Color.FromHex("#2E7D32");
+    private static readonly Color WarningColor = Color.FromHex("#F2994A");
+    private static readonly Color DangerColor = Color.FromHex("#C0392B");
+    private static readonly Color NeutralColor = Color.FromHex("#8E8E93");
+
     // ZIMRA-style fiscal invoice layout. TIN/VAT No/Device Serial No/Fiscal Device ID are real
     // fields the owner fills in themselves in Settings (blank by default, printed only if set) —
     // never fabricated. Deliberately excludes the QR code and "Verification code / verify at
@@ -55,34 +68,85 @@ public class DocumentGenerationTools(
         }
 
         var po = await purchaseOrderTools.GetPurchaseOrderAsync(businessId, purchaseOrderId, cancellationToken);
-        var businessName = await GetBusinessNameAsync(cancellationToken);
+        var business = await dbContext.Businesses.AsNoTracking().FirstOrDefaultAsync(b => b.Id == tenantProvider.CurrentBusinessId, cancellationToken)
+            ?? throw new InvalidOperationException("Business not found.");
+        var supplier = await dbContext.Suppliers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == po.SupplierId, cancellationToken);
 
-        var lines = po.Items.Select(i => (i.Name, i.Quantity, i.UnitCost, i.Subtotal)).ToList();
-
-        return BuildPurchaseOrderDocument(
-            businessName, "Purchase Order",
-            $"Supplier: {po.SupplierName}  ·  {po.CreatedAt:d MMM yyyy}",
-            lines, po.TotalAmount, po.Currency, [$"Status: {po.Status}"]);
-    }
-
-    private async Task<string> GetBusinessNameAsync(CancellationToken cancellationToken)
-    {
-        var business = await dbContext.Businesses.AsNoTracking().FirstOrDefaultAsync(b => b.Id == tenantProvider.CurrentBusinessId, cancellationToken);
-        return business?.Name ?? "Business";
+        return BuildPurchaseOrderDocument(business, supplier, po);
     }
 
     private static string FormatMoney(decimal amount, string currency) => $"{currency} {amount:0.00}";
 
+    private static Color PurchaseOrderStatusColor(PurchaseOrderStatus status) => status switch
+    {
+        PurchaseOrderStatus.Ordered => WarningColor,
+        PurchaseOrderStatus.Received => SuccessColor,
+        PurchaseOrderStatus.Cancelled => DangerColor,
+        _ => NeutralColor,
+    };
+
+    // Business name + document title/number in a right-aligned block, underlined by a brand-colored
+    // rule — the one letterhead element shared by every document this app generates.
+    private static void ComposeLetterhead(ColumnDescriptor column, string businessName, string documentTitle, string documentNumber)
+    {
+        column.Item().Row(row =>
+        {
+            row.RelativeItem().Text(businessName).FontSize(18).Bold().FontColor(TextColor);
+            row.ConstantItem(160).Column(titleCol =>
+            {
+                titleCol.Item().AlignRight().Text(documentTitle.ToUpperInvariant()).FontSize(14).Bold().FontColor(BrandColor).LetterSpacing(0.05f);
+                titleCol.Item().AlignRight().Text(documentNumber).FontSize(9).FontColor(MutedColor);
+            });
+        });
+        column.Item().PaddingTop(8).PaddingBottom(12).LineHorizontal(1.5f).LineColor(BrandColor);
+    }
+
+    // A labeled "Seller / Buyer / Supplier" info block — small uppercase brand-colored label, bold
+    // name, then any non-blank contact lines. Shared by both documents so they read as one family
+    // instead of two independently-styled layouts.
+    private static void ComposePartyBlock(ColumnDescriptor column, string label, string name, params string?[] detailLines)
+    {
+        column.Item().Text(label.ToUpperInvariant()).FontSize(8).Bold().FontColor(BrandColor).LetterSpacing(0.05f);
+        column.Item().PaddingTop(2).Text(name).FontSize(11).Bold().FontColor(TextColor);
+        foreach (var line in detailLines)
+        {
+            if (!string.IsNullOrWhiteSpace(line))
+            {
+                column.Item().Text(line).FontSize(9).FontColor(MutedColor);
+            }
+        }
+    }
+
+    private static IContainer StyleTableHeaderCell(IContainer container) =>
+        container.Background(BrandColor).PaddingVertical(6).PaddingHorizontal(4);
+
+    private static IContainer StyleTableCell(IContainer container) =>
+        container.BorderBottom(0.75f).BorderColor(BorderColor).PaddingVertical(6).PaddingHorizontal(3);
+
+    private static void ComposeDocumentFooter(IContainer container)
+    {
+        container.Column(col =>
+        {
+            col.Item().LineHorizontal(0.75f).LineColor(BorderColor);
+            col.Item().PaddingTop(6).AlignCenter().Text(text =>
+            {
+                text.Span("Generated ").FontSize(8).FontColor(MutedColor);
+                text.Span(DateTimeOffset.UtcNow.ToString("d MMM yyyy, HH:mm")).FontSize(8).FontColor(MutedColor);
+            });
+        });
+    }
+
     // Seller/buyer blocks, a fiscal-style line-item table (Code/Description/Qty/Price excl./Amount
     // excl./VAT/Total incl.), and a tax-exclusive/VAT/inclusive totals breakdown — a different
-    // shape from BuildPurchaseOrderDocument's simple item/qty/price/subtotal layout because this is
-    // the fiscal sale-to-a-customer document (Section: ZIMRA-style invoice redesign), not a
-    // business-to-supplier PO.
+    // shape from BuildPurchaseOrderDocument's item/qty/price/subtotal layout because this is the
+    // fiscal sale-to-a-customer document, not a business-to-supplier PO. Both share the same brand
+    // letterhead, party-block, and table styling helpers above.
     private static byte[] BuildOrderInvoiceDocument(
         Business business, Customer? customer, OrderDetailSummary order, IReadOnlyList<string> footerNotes)
     {
         var vatApplies = order.VatAmount > 0;
         var documentTitle = vatApplies ? "Tax Invoice" : "Receipt";
+        var documentNumber = order.InvoiceNumber is not null ? $"Invoice No: {order.InvoiceNumber}" : $"Order #{order.Id.ToString()[..8].ToUpperInvariant()}";
         var totalExcl = order.TotalAmount - order.VatAmount;
 
         var document = QuestPDF.Fluent.Document.Create(container =>
@@ -91,140 +155,161 @@ public class DocumentGenerationTools(
             {
                 page.Size(PageSizes.A5);
                 page.Margin(30);
-                page.DefaultTextStyle(x => x.FontSize(10));
+                page.DefaultTextStyle(x => x.FontSize(10).FontColor(TextColor));
 
-                page.Header().Column(col =>
-                {
-                    col.Item().Text(business.Name).FontSize(16).Bold();
-                    col.Item().Text(documentTitle).FontSize(18).Bold();
-                });
+                page.Header().Column(col => ComposeLetterhead(col, business.Name, documentTitle, documentNumber));
 
-                page.Content().PaddingTop(12).Column(col =>
+                page.Content().Column(col =>
                 {
                     col.Item().Row(row =>
                     {
-                        row.RelativeItem().Column(sellerCol =>
-                        {
-                            sellerCol.Item().Text("Seller").FontSize(9).Bold().FontColor(Colors.Grey.Darken1);
-                            sellerCol.Item().Text(business.Name).Bold();
-                            if (!string.IsNullOrWhiteSpace(business.Tin)) sellerCol.Item().Text($"TIN: {business.Tin}");
-                            if (!string.IsNullOrWhiteSpace(business.VatNumber)) sellerCol.Item().Text($"VAT No: {business.VatNumber}");
-                            if (!string.IsNullOrWhiteSpace(business.Address)) sellerCol.Item().Text(business.Address!);
-                            if (!string.IsNullOrWhiteSpace(business.Email)) sellerCol.Item().Text(business.Email!);
-                            if (!string.IsNullOrWhiteSpace(business.Phone)) sellerCol.Item().Text(business.Phone!);
-                        });
+                        row.RelativeItem().Column(sellerCol => ComposePartyBlock(
+                            sellerCol, "Seller", business.Name,
+                            business.Tin is null ? null : $"TIN: {business.Tin}",
+                            business.VatNumber is null ? null : $"VAT No: {business.VatNumber}",
+                            business.Address, business.Email, business.Phone));
 
-                        row.RelativeItem().Column(buyerCol =>
-                        {
-                            buyerCol.Item().Text("Buyer").FontSize(9).Bold().FontColor(Colors.Grey.Darken1);
-                            buyerCol.Item().Text(order.CustomerName ?? "Walk-in Customer").Bold();
-                            if (!string.IsNullOrWhiteSpace(customer?.Tin)) buyerCol.Item().Text($"TIN: {customer!.Tin}");
-                            if (!string.IsNullOrWhiteSpace(customer?.Address)) buyerCol.Item().Text(customer!.Address!);
-                            if (!string.IsNullOrWhiteSpace(customer?.Email)) buyerCol.Item().Text(customer!.Email!);
-                            if (!string.IsNullOrWhiteSpace(order.CustomerWhatsAppNumber)) buyerCol.Item().Text(order.CustomerWhatsAppNumber);
-                        });
+                        row.ConstantItem(16);
+
+                        row.RelativeItem().Column(buyerCol => ComposePartyBlock(
+                            buyerCol, "Buyer", order.CustomerName ?? "Walk-in Customer",
+                            customer?.Tin is null ? null : $"TIN: {customer.Tin}",
+                            customer?.Address, customer?.Email, order.CustomerWhatsAppNumber));
                     });
 
-                    col.Item().PaddingTop(8).Row(row =>
+                    col.Item().PaddingTop(10).Row(row =>
                     {
-                        row.RelativeItem().Column(metaCol =>
-                        {
-                            if (order.InvoiceNumber is not null) metaCol.Item().Text($"Invoice No: {order.InvoiceNumber}");
-                            metaCol.Item().Text($"Date: {order.CreatedAt:d MMM yyyy, HH:mm}");
-                        });
+                        row.RelativeItem().Text($"Date: {order.CreatedAt:d MMM yyyy, HH:mm}").FontSize(9).FontColor(MutedColor);
 
                         row.RelativeItem().Column(metaCol =>
                         {
-                            if (!string.IsNullOrWhiteSpace(business.DeviceSerialNumber)) metaCol.Item().AlignRight().Text($"Device Serial No: {business.DeviceSerialNumber}");
-                            if (!string.IsNullOrWhiteSpace(business.FiscalDeviceId)) metaCol.Item().AlignRight().Text($"Fiscal Device ID: {business.FiscalDeviceId}");
+                            if (!string.IsNullOrWhiteSpace(business.DeviceSerialNumber)) metaCol.Item().AlignRight().Text($"Device Serial No: {business.DeviceSerialNumber}").FontSize(9).FontColor(MutedColor);
+                            if (!string.IsNullOrWhiteSpace(business.FiscalDeviceId)) metaCol.Item().AlignRight().Text($"Fiscal Device ID: {business.FiscalDeviceId}").FontSize(9).FontColor(MutedColor);
                         });
                     });
 
-                    col.Item().PaddingTop(10).Table(table =>
+                    col.Item().PaddingTop(14).Table(table =>
                     {
                         table.ColumnsDefinition(columns =>
                         {
-                            columns.RelativeColumn(1.1f);
-                            columns.RelativeColumn(2.4f);
-                            columns.RelativeColumn(0.8f);
-                            columns.RelativeColumn(1.2f);
-                            columns.RelativeColumn(1.2f);
-                            columns.RelativeColumn(1f);
                             columns.RelativeColumn(1.3f);
+                            columns.RelativeColumn(2.4f);
+                            columns.RelativeColumn(0.7f);
+                            columns.RelativeColumn(1.15f);
+                            columns.RelativeColumn(1.15f);
+                            columns.RelativeColumn(0.9f);
+                            columns.RelativeColumn(1.2f);
                         });
 
                         table.Header(header =>
                         {
-                            header.Cell().Text("Code").Bold();
-                            header.Cell().Text("Description").Bold();
-                            header.Cell().AlignRight().Text("Qty").Bold();
-                            header.Cell().PaddingLeft(4).AlignRight().Text("Price").Bold();
-                            header.Cell().PaddingLeft(4).AlignRight().Text("Amount").Bold();
-                            header.Cell().PaddingLeft(4).AlignRight().Text("VAT").Bold();
-                            header.Cell().PaddingLeft(4).AlignRight().Text("Total").Bold();
+                            header.Cell().Element(StyleTableHeaderCell).Text("Code").FontSize(9).Bold().FontColor(Colors.White);
+                            header.Cell().Element(StyleTableHeaderCell).Text("Description").FontSize(9).Bold().FontColor(Colors.White);
+                            header.Cell().Element(StyleTableHeaderCell).AlignRight().Text("Qty").FontSize(9).Bold().FontColor(Colors.White);
+                            header.Cell().Element(StyleTableHeaderCell).AlignRight().Text("Price").FontSize(9).Bold().FontColor(Colors.White);
+                            header.Cell().Element(StyleTableHeaderCell).AlignRight().Text("Amount").FontSize(9).Bold().FontColor(Colors.White);
+                            header.Cell().Element(StyleTableHeaderCell).AlignRight().Text("VAT").FontSize(9).Bold().FontColor(Colors.White);
+                            header.Cell().Element(StyleTableHeaderCell).AlignRight().Text("Total").FontSize(9).Bold().FontColor(Colors.White);
                         });
 
                         foreach (var line in order.Items)
                         {
-                            table.Cell().PaddingVertical(2).Text(line.Code);
-                            table.Cell().PaddingVertical(2).Text(line.Name);
-                            table.Cell().PaddingVertical(2).AlignRight().Text(line.Quantity.ToString());
-                            table.Cell().PaddingVertical(2).PaddingLeft(4).AlignRight().Text(FormatMoney(line.UnitPrice, order.Currency));
-                            table.Cell().PaddingVertical(2).PaddingLeft(4).AlignRight().Text(FormatMoney(line.Subtotal, order.Currency));
-                            table.Cell().PaddingVertical(2).PaddingLeft(4).AlignRight().Text(FormatMoney(line.VatAmount, order.Currency));
-                            table.Cell().PaddingVertical(2).PaddingLeft(4).AlignRight().Text(FormatMoney(line.Subtotal + line.VatAmount, order.Currency));
+                            table.Cell().Element(StyleTableCell).Text(line.Code).FontSize(9);
+                            table.Cell().Element(StyleTableCell).Text(line.Name).FontSize(9);
+                            table.Cell().Element(StyleTableCell).AlignRight().Text(line.Quantity.ToString()).FontSize(9);
+                            table.Cell().Element(StyleTableCell).AlignRight().Text(FormatMoney(line.UnitPrice, order.Currency)).FontSize(9);
+                            table.Cell().Element(StyleTableCell).AlignRight().Text(FormatMoney(line.Subtotal, order.Currency)).FontSize(9);
+                            table.Cell().Element(StyleTableCell).AlignRight().Text(FormatMoney(line.VatAmount, order.Currency)).FontSize(9);
+                            table.Cell().Element(StyleTableCell).AlignRight().Text(FormatMoney(line.Subtotal + line.VatAmount, order.Currency)).FontSize(9);
                         }
                     });
 
-                    col.Item().PaddingTop(10).AlignRight().Text($"Total (excl. tax): {FormatMoney(totalExcl, order.Currency)}").FontSize(10);
-                    if (vatApplies)
+                    col.Item().PaddingTop(14).AlignRight().Width(220).Column(totalsCol =>
                     {
-                        col.Item().AlignRight().Text($"Total {business.VatRate:0.##%} VAT: {FormatMoney(order.VatAmount, order.Currency)}").FontSize(10);
-                    }
-                    col.Item().PaddingTop(4).AlignRight().Text($"Invoice total: {FormatMoney(order.TotalAmount, order.Currency)}").FontSize(14).Bold();
+                        totalsCol.Item().Row(row =>
+                        {
+                            row.RelativeItem().Text("Total (excl. tax)").FontSize(9).FontColor(MutedColor);
+                            row.RelativeItem().AlignRight().Text(FormatMoney(totalExcl, order.Currency)).FontSize(9);
+                        });
+                        if (vatApplies)
+                        {
+                            totalsCol.Item().PaddingTop(2).Row(row =>
+                            {
+                                row.RelativeItem().Text($"VAT ({business.VatRate:0.##%})").FontSize(9).FontColor(MutedColor);
+                                row.RelativeItem().AlignRight().Text(FormatMoney(order.VatAmount, order.Currency)).FontSize(9);
+                            });
+                        }
+                        totalsCol.Item().PaddingTop(6).LineHorizontal(1).LineColor(BrandColor);
+                        totalsCol.Item().PaddingTop(6).Row(row =>
+                        {
+                            row.RelativeItem().Text("Invoice total").FontSize(12).Bold();
+                            row.RelativeItem().AlignRight().Text(FormatMoney(order.TotalAmount, order.Currency)).FontSize(14).Bold().FontColor(BrandColor);
+                        });
+                    });
 
-                    foreach (var note in footerNotes)
+                    if (footerNotes.Count > 0)
                     {
-                        col.Item().PaddingTop(6).Text(note).FontSize(10);
+                        col.Item().PaddingTop(14).Background(BrandColorSoft).Padding(8).Column(noteCol =>
+                        {
+                            foreach (var note in footerNotes)
+                            {
+                                noteCol.Item().Text(note).FontSize(9).FontColor(TextColor);
+                            }
+                        });
                     }
+
+                    col.Item().PaddingTop(16).AlignCenter().Text("Thank you for your business.").FontSize(9).Italic().FontColor(MutedColor);
                 });
 
-                page.Footer().AlignCenter().Text(text =>
-                {
-                    text.Span("Generated ").FontSize(8);
-                    text.Span(DateTimeOffset.UtcNow.ToString("d MMM yyyy, HH:mm")).FontSize(8);
-                });
+                page.Footer().Element(ComposeDocumentFooter);
             });
         });
 
         return document.GeneratePdf();
     }
 
-    // Unchanged simple layout for the business-to-supplier Purchase Order document — a different
-    // concept from the fiscal sale-to-a-customer invoice above, out of scope for the ZIMRA redesign.
-    private static byte[] BuildPurchaseOrderDocument(
-        string businessName, string documentTitle, string subtitle,
-        IReadOnlyList<(string Name, int Quantity, decimal UnitPrice, decimal Subtotal)> lines,
-        decimal total, string currency, IReadOnlyList<string> footerNotes)
+    // Business-to-supplier Purchase Order — same brand letterhead/party-block/table styling as the
+    // invoice above so both documents read as one product, but a simpler shape (no VAT/fiscal
+    // columns, since a PO isn't a fiscal sale document) with a colored status badge in place of a
+    // buyer block.
+    private static byte[] BuildPurchaseOrderDocument(Business business, Supplier? supplier, PurchaseOrderDetail po)
     {
+        var documentNumber = $"PO #{po.Id.ToString()[..8].ToUpperInvariant()}";
+        var statusColor = PurchaseOrderStatusColor(po.Status);
+
         var document = QuestPDF.Fluent.Document.Create(container =>
         {
             container.Page(page =>
             {
                 page.Size(PageSizes.A5);
                 page.Margin(30);
-                page.DefaultTextStyle(x => x.FontSize(11));
+                page.DefaultTextStyle(x => x.FontSize(10).FontColor(TextColor));
 
-                page.Header().Column(col =>
-                {
-                    col.Item().Text(businessName).FontSize(16).Bold();
-                    col.Item().Text(documentTitle).FontSize(20).Bold();
-                    col.Item().Text(subtitle).FontSize(10).FontColor(Colors.Grey.Darken1);
-                });
+                page.Header().Column(col => ComposeLetterhead(col, business.Name, "Purchase Order", documentNumber));
 
-                page.Content().PaddingTop(15).Column(col =>
+                page.Content().Column(col =>
                 {
-                    col.Item().Table(table =>
+                    col.Item().Row(row =>
+                    {
+                        row.RelativeItem().Column(supplierCol => ComposePartyBlock(
+                            supplierCol, "Supplier", supplier?.Name ?? po.SupplierName,
+                            supplier?.ContactPhone, supplier?.Email));
+
+                        row.ConstantItem(16);
+
+                        row.RelativeItem().Column(metaCol =>
+                        {
+                            metaCol.Item().Text("STATUS").FontSize(8).Bold().FontColor(BrandColor).LetterSpacing(0.05f);
+                            metaCol.Item().PaddingTop(2).Text(po.Status.ToString()).FontSize(11).Bold().FontColor(statusColor);
+                            metaCol.Item().PaddingTop(6).Text($"Date: {po.CreatedAt:d MMM yyyy}").FontSize(9).FontColor(MutedColor);
+                            if (po.ReceivedAt is not null)
+                            {
+                                metaCol.Item().Text($"Received: {po.ReceivedAt:d MMM yyyy}").FontSize(9).FontColor(MutedColor);
+                            }
+                        });
+                    });
+
+                    col.Item().PaddingTop(14).Table(table =>
                     {
                         table.ColumnsDefinition(columns =>
                         {
@@ -236,34 +321,46 @@ public class DocumentGenerationTools(
 
                         table.Header(header =>
                         {
-                            header.Cell().Text("Item").Bold();
-                            header.Cell().AlignRight().Text("Qty").Bold();
-                            header.Cell().PaddingLeft(8).AlignRight().Text("Price").Bold();
-                            header.Cell().PaddingLeft(8).AlignRight().Text("Subtotal").Bold();
+                            header.Cell().Element(StyleTableHeaderCell).Text("Item").FontSize(9).Bold().FontColor(Colors.White);
+                            header.Cell().Element(StyleTableHeaderCell).AlignRight().Text("Qty").FontSize(9).Bold().FontColor(Colors.White);
+                            header.Cell().Element(StyleTableHeaderCell).AlignRight().Text("Unit cost").FontSize(9).Bold().FontColor(Colors.White);
+                            header.Cell().Element(StyleTableHeaderCell).AlignRight().Text("Subtotal").FontSize(9).Bold().FontColor(Colors.White);
                         });
 
-                        foreach (var line in lines)
+                        foreach (var item in po.Items)
                         {
-                            table.Cell().PaddingVertical(2).Text(line.Name);
-                            table.Cell().PaddingVertical(2).AlignRight().Text(line.Quantity.ToString());
-                            table.Cell().PaddingVertical(2).PaddingLeft(8).AlignRight().Text(FormatMoney(line.UnitPrice, currency));
-                            table.Cell().PaddingVertical(2).PaddingLeft(8).AlignRight().Text(FormatMoney(line.Subtotal, currency));
+                            table.Cell().Element(StyleTableCell).Text(item.Name).FontSize(9);
+                            table.Cell().Element(StyleTableCell).AlignRight().Text(item.Quantity.ToString()).FontSize(9);
+                            table.Cell().Element(StyleTableCell).AlignRight().Text(FormatMoney(item.UnitCost, po.Currency)).FontSize(9);
+                            table.Cell().Element(StyleTableCell).AlignRight().Text(FormatMoney(item.Subtotal, po.Currency)).FontSize(9);
                         }
                     });
 
-                    col.Item().PaddingTop(10).AlignRight().Text($"Total: {FormatMoney(total, currency)}").FontSize(14).Bold();
-
-                    foreach (var note in footerNotes)
+                    col.Item().PaddingTop(14).AlignRight().Width(220).Column(totalsCol =>
                     {
-                        col.Item().PaddingTop(6).Text(note).FontSize(10);
-                    }
+                        totalsCol.Item().LineHorizontal(1).LineColor(BrandColor);
+                        totalsCol.Item().PaddingTop(6).Row(row =>
+                        {
+                            row.RelativeItem().Text("Total").FontSize(12).Bold();
+                            row.RelativeItem().AlignRight().Text(FormatMoney(po.TotalAmount, po.Currency)).FontSize(14).Bold().FontColor(BrandColor);
+                        });
+                        if (po.AmountPaid > 0)
+                        {
+                            totalsCol.Item().PaddingTop(4).Row(row =>
+                            {
+                                row.RelativeItem().Text("Paid").FontSize(9).FontColor(MutedColor);
+                                row.RelativeItem().AlignRight().Text(FormatMoney(po.AmountPaid, po.Currency)).FontSize(9);
+                            });
+                            totalsCol.Item().Row(row =>
+                            {
+                                row.RelativeItem().Text("Owed").FontSize(9).FontColor(MutedColor);
+                                row.RelativeItem().AlignRight().Text(FormatMoney(po.AmountOwed, po.Currency)).FontSize(9);
+                            });
+                        }
+                    });
                 });
 
-                page.Footer().AlignCenter().Text(text =>
-                {
-                    text.Span("Generated ").FontSize(8);
-                    text.Span(DateTimeOffset.UtcNow.ToString("d MMM yyyy, HH:mm")).FontSize(8);
-                });
+                page.Footer().Element(ComposeDocumentFooter);
             });
         });
 

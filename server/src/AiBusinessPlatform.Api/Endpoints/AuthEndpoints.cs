@@ -1,6 +1,3 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 using AiBusinessPlatform.Api.Contracts;
 using AiBusinessPlatform.Domain;
 using AiBusinessPlatform.Domain.Entities;
@@ -9,7 +6,6 @@ using AiBusinessPlatform.Infrastructure.Data;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
 
 namespace AiBusinessPlatform.Api.Endpoints;
 
@@ -121,25 +117,7 @@ public static class AuthEndpoints
 
     private static AuthResponse IssueToken(BusinessUser user, JwtOptions options)
     {
-        var claims = new[]
-        {
-            new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-            new Claim("business_id", user.BusinessId.ToString()),
-            new Claim(ClaimTypes.Role, user.Role.ToString()),
-            new Claim(JwtRegisteredClaimNames.Email, user.Email)
-        };
-
-        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(options.SigningKey));
-        var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
-
-        var token = new JwtSecurityToken(
-            issuer: options.Issuer,
-            audience: options.Audience,
-            claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(options.ExpiryMinutes),
-            signingCredentials: credentials);
-
-        var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
+        var tokenString = BusinessJwtTokenFactory.CreateAccessToken(user, options);
         return new AuthResponse(tokenString, user.BusinessId, user.Id, user.Role.ToString());
     }
 }

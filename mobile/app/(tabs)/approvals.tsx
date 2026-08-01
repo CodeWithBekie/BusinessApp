@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -16,6 +16,8 @@ import { formatRelativeDate } from '@/src/common/format';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
 import { useIsOnline } from '@/src/offline/networkStatus';
 import { useHasPermission } from '@/src/auth/permissions';
+import { useConfirm } from '@/src/ui/ConfirmContext';
+import { useToast } from '@/src/ui/ToastContext';
 
 type FilterValue = ApprovalStatus | 'All';
 type Decision = 'approve' | 'reject';
@@ -93,12 +95,13 @@ export default function ApprovalsScreen() {
   const tint = Colors[colorScheme].tint;
   const isOnline = useIsOnline();
   const canDecideApprovals = useHasPermission('DecideApprovals');
+  const { confirm } = useConfirm();
+  const { show: showToast } = useToast();
   const [filter, setFilter] = useState<FilterValue>('Pending');
   const fetchApprovals = useCallback(() => apiClient.getApprovals(), []);
   const { data: items, error, refreshing, isFromCache, reload: load } = useCachedFetch<PendingApproval[]>('approvals', fetchApprovals);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [confirmTarget, setConfirmTarget] = useState<{ item: PendingApproval; decision: Decision } | null>(null);
   const [expandedProofItemId, setExpandedProofItemId] = useState<string | null>(null);
   const [proofDataUri, setProofDataUri] = useState<string | null>(null);
   const [loadingProof, setLoadingProof] = useState(false);
@@ -131,21 +134,38 @@ export default function ApprovalsScreen() {
     }, [load])
   );
 
-  const performDecision = useCallback(async () => {
-    if (!confirmTarget) return;
-    const { item, decision } = confirmTarget;
-    setConfirmTarget(null);
-    setActionError(null);
-    setPendingActionId(item.id);
-    try {
-      await apiClient.decideApproval(item.id, decision);
-      load();
-    } catch (err) {
-      setActionError((err as Error).message);
-    } finally {
-      setPendingActionId(null);
-    }
-  }, [confirmTarget, load]);
+  const performDecision = useCallback(
+    async (item: PendingApproval, decision: Decision) => {
+      setActionError(null);
+      setPendingActionId(item.id);
+      try {
+        await apiClient.decideApproval(item.id, decision);
+        showToast(decision === 'approve' ? 'Request approved.' : 'Request rejected.', 'success');
+        load();
+      } catch (err) {
+        const message = (err as Error).message;
+        setActionError(message);
+        showToast(message, 'error');
+      } finally {
+        setPendingActionId(null);
+      }
+    },
+    [load, showToast]
+  );
+
+  const confirmDecision = useCallback(
+    async (item: PendingApproval, decision: Decision) => {
+      const { title } = describeDetails(item.actionType, item.detailsJson);
+      const ok = await confirm({
+        title: decision === 'approve' ? 'Approve this request?' : 'Reject this request?',
+        message: title,
+        confirmLabel: decision === 'approve' ? 'Approve' : 'Reject',
+        destructive: decision === 'reject',
+      });
+      if (ok) performDecision(item, decision);
+    },
+    [confirm, performDecision]
+  );
 
   const visibleItems = (items ?? []).filter((item) => filter === 'All' || item.status === filter);
 
@@ -203,14 +223,14 @@ export default function ApprovalsScreen() {
                       variant="success"
                       style={styles.actionButton}
                       disabled={pendingActionId === item.id || !isOnline}
-                      onPress={() => setConfirmTarget({ item, decision: 'approve' })}
+                      onPress={() => confirmDecision(item, 'approve')}
                     />
                     <Button
                       label={pendingActionId === item.id ? '…' : 'Reject'}
                       variant="destructive"
                       style={styles.actionButton}
                       disabled={pendingActionId === item.id || !isOnline}
-                      onPress={() => setConfirmTarget({ item, decision: 'reject' })}
+                      onPress={() => confirmDecision(item, 'reject')}
                     />
                   </View>
                   {!isOnline && <Text style={styles.offlineNotice}>You're offline — connect to decide.</Text>}
@@ -219,32 +239,6 @@ export default function ApprovalsScreen() {
             </Card>
           );
         })}
-
-      <Modal visible={confirmTarget !== null} transparent animationType="fade" onRequestClose={() => setConfirmTarget(null)}>
-        <View style={styles.modalOverlay} lightColor="rgba(0,0,0,0.4)" darkColor="rgba(0,0,0,0.6)">
-          <View style={styles.modalCard} lightColor="#fff" darkColor="#1c1c1e">
-            <Text style={styles.modalTitle}>
-              {confirmTarget?.decision === 'approve' ? 'Approve this request?' : 'Reject this request?'}
-            </Text>
-            {confirmTarget && (
-              <Text style={[styles.modalBody, colorScheme === 'dark' ? styles.metaDark : styles.metaLight]}>
-                {describeDetails(confirmTarget.item.actionType, confirmTarget.item.detailsJson).title}
-              </Text>
-            )}
-            <View style={styles.modalActions} lightColor="transparent" darkColor="transparent">
-              <Pressable style={[styles.modalButton, styles.modalCancelButton]} onPress={() => setConfirmTarget(null)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Button
-                label={confirmTarget?.decision === 'approve' ? 'Approve' : 'Reject'}
-                variant={confirmTarget?.decision === 'approve' ? 'success' : 'destructive'}
-                style={styles.modalButton}
-                onPress={performDecision}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
     </ScrollView>
   );
 }
@@ -271,12 +265,4 @@ const styles = StyleSheet.create({
   inlineEditButtonText: { fontWeight: '600', fontSize: 13 },
   proofImage: { width: '100%', height: 240, marginTop: spacing.sm + 2, borderRadius: radius.sm, backgroundColor: '#eee' },
   offlineNotice: { color: semanticColors.danger, fontSize: 12, marginTop: spacing.sm },
-  modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  modalCard: { width: '100%', maxWidth: 360, borderRadius: 12, padding: 20 },
-  modalTitle: { fontSize: 17, fontWeight: '700', marginBottom: 8 },
-  modalBody: { fontSize: 14, marginBottom: 20 },
-  modalActions: { flexDirection: 'row', gap: 12 },
-  modalButton: { flex: 1 },
-  modalCancelButton: { paddingVertical: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#ccc' },
-  modalCancelText: { fontWeight: '600' },
 });

@@ -12,4 +12,5 @@ public class PurchaseOrder : ITenantScoped
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? ReceivedAt { get; set; }
+    public DateTimeOffset? ExpectedDeliveryDate { get; set; }
 }

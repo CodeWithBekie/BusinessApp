@@ -234,16 +234,20 @@ public static class DashboardEndpoints
             }
         }).RequireAuthorization("Permission:ManageOrders");
 
-        // Corrects the payment method on an order's already-confirmed payment — thin mapping over
-        // IOrderTools.UpdatePaymentProviderAsync, the same function the MCP server's
-        // update_order_payment_provider tool calls.
+        // Corrects the payment method and/or amount on an order's already-confirmed payment — thin
+        // mapping over IOrderTools.UpdatePaymentAsync, the same function the MCP server's
+        // update_order_payment tool calls.
         api.MapPatch("/orders/{id:guid}/payment", async (
-            Guid id, UpdatePaymentProviderRequest request, IOrderTools orderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
+            Guid id, UpdatePaymentRequest request, IOrderTools orderTools, ICurrentTenantProvider tenantProvider, CancellationToken ct) =>
         {
             try
             {
-                var result = await orderTools.UpdatePaymentProviderAsync(tenantProvider.CurrentBusinessId, id, request.Provider, ct);
+                var result = await orderTools.UpdatePaymentAsync(tenantProvider.CurrentBusinessId, id, request.Provider, request.Amount, ct);
                 return Results.Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(ex.Message);
             }
             catch (InvalidOperationException ex)
             {
@@ -439,7 +443,7 @@ public static class DashboardEndpoints
             try
             {
                 var supplier = await supplierTools.CreateSupplierAsync(
-                    tenantProvider.CurrentBusinessId, request.Name, request.ContactPhone, request.Email, request.Notes, ct);
+                    tenantProvider.CurrentBusinessId, request.Name, request.ContactPhone, request.Email, request.Notes, request.Category, request.Rating, ct);
                 return Results.Ok(supplier);
             }
             catch (ArgumentException ex)
@@ -454,7 +458,7 @@ public static class DashboardEndpoints
             try
             {
                 var supplier = await supplierTools.UpdateSupplierAsync(
-                    tenantProvider.CurrentBusinessId, id, request.Name, request.ContactPhone, request.Email, request.Notes, request.Active, ct);
+                    tenantProvider.CurrentBusinessId, id, request.Name, request.ContactPhone, request.Email, request.Notes, request.Category, request.Rating, request.Active, ct);
                 return Results.Ok(supplier);
             }
             catch (ArgumentException ex)
@@ -491,7 +495,7 @@ public static class DashboardEndpoints
             try
             {
                 var items = request.Items.Select(i => new PurchaseOrderLineItem(i.CatalogItemId, i.NewItemName, i.NewItemType, i.NewItemUnit, i.Quantity, i.UnitCost)).ToList();
-                var result = await purchaseOrderTools.CreatePurchaseOrderAsync(tenantProvider.CurrentBusinessId, request.SupplierId, items, request.Currency, ct);
+                var result = await purchaseOrderTools.CreatePurchaseOrderAsync(tenantProvider.CurrentBusinessId, request.SupplierId, items, request.Currency, request.ExpectedDeliveryDate, ct);
                 return Results.Ok(result);
             }
             catch (ArgumentException ex)

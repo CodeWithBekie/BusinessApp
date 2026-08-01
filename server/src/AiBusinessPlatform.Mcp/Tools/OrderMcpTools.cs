@@ -60,11 +60,11 @@ public class OrderMcpTools(IOrderTools orderTools, ICurrentTenantProvider tenant
         return orderTools.RecordManualPaymentAsync(tenantProvider.CurrentBusinessId, orderId, provider, reference, amount, cancellationToken);
     }
 
-    [McpServerTool(Name = "update_order_payment_provider"), Description("Corrects the payment method on an order's already-confirmed payment — e.g. it was logged as Cash but was actually a Bank transfer. provider must be \"Cash\", \"EcoCash\", \"Bank\", or \"Other\". Fails if the order has no confirmed payment yet, or is Fulfilled/Cancelled.")]
-    public Task<OrderDetailSummary> UpdateOrderPaymentProvider(Guid orderId, PaymentProvider provider, CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "update_order_payment"), Description("Corrects the payment method and/or amount on an order's already-confirmed payment — e.g. it was logged as Cash but was actually a Bank transfer, or the amount was mistyped. provider must be \"Cash\", \"EcoCash\", \"Bank\", or \"Other\". amount must be greater than zero. Fails if the order has no confirmed payment yet, or is Fulfilled/Cancelled.")]
+    public Task<OrderDetailSummary> UpdateOrderPayment(Guid orderId, PaymentProvider provider, decimal amount, CancellationToken cancellationToken = default)
     {
         permissionChecker.EnsurePermission(Permission.ManageOrders);
-        return orderTools.UpdatePaymentProviderAsync(tenantProvider.CurrentBusinessId, orderId, provider, cancellationToken);
+        return orderTools.UpdatePaymentAsync(tenantProvider.CurrentBusinessId, orderId, provider, amount, cancellationToken);
     }
 
     [McpServerTool(Name = "pay_order_with_ecocash"), Description("Initiates an EcoCash payment charge to the given phone number for one of this business's own Invoiced (unpaid) orders — use when the owner has the customer's EcoCash number and wants to collect payment now, or to retry with a corrected number after the automatic invoice-time attempt used the wrong one. Resolve orderId via get_order or list_orders first — never guess an id. Fails if the business has no EcoCash or Paynow gateway connected yet, or if the order isn't Invoiced. Only call when the owner has clearly and explicitly asked to charge this order.")]

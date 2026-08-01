@@ -8,6 +8,7 @@ using AiBusinessPlatform.Infrastructure.Ledger;
 using AiBusinessPlatform.Infrastructure.Payments;
 using AiBusinessPlatform.Infrastructure.Tools;
 using AiBusinessPlatform.Infrastructure.WhatsApp;
+using AiBusinessPlatform.Mcp.DevTools;
 using AiBusinessPlatform.Mcp.Prompts;
 using AiBusinessPlatform.Mcp.Resources;
 using AiBusinessPlatform.Mcp.Tools;
@@ -29,6 +30,10 @@ if (builder.Environment.IsDevelopment())
         policy.SetIsOriginAllowed(origin => new Uri(origin).IsLoopback)
             .AllowAnyHeader()
             .AllowAnyMethod()));
+
+    // Dev-only OAuth 2.0 shim (DevOAuthEndpoints) so the MCP Inspector — which speaks OAuth, not
+    // this host's real JWT bearer scheme — can obtain a token and connect. See that file's remarks.
+    builder.Services.AddSingleton<DevOAuthStateStore>();
 }
 
 builder.Services.AddDbContext<AiBusinessPlatformDbContext>(options =>
@@ -132,6 +137,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapDevOAuthEndpoints();
+}
 
 app.MapMcp().RequireAuthorization();
 

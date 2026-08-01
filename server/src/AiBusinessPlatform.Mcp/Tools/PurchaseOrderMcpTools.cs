@@ -23,11 +23,11 @@ public class PurchaseOrderMcpTools(IPurchaseOrderTools purchaseOrderTools, ICurr
     public Task<PurchaseOrderDetail> GetPurchaseOrder(Guid purchaseOrderId, CancellationToken cancellationToken = default)
         => purchaseOrderTools.GetPurchaseOrderAsync(tenantProvider.CurrentBusinessId, purchaseOrderId, cancellationToken);
 
-    [McpServerTool(Name = "create_purchase_order"), Description("Creates a purchase order to restock from a supplier: one or more line items with the quantity and unit cost being ordered. For each line, either set catalogItemId to restock an existing item (resolve it via list_catalog_items first — never guess an id), or leave catalogItemId null and supply newItemName + newItemType (\"Stock\", \"TimeBased\", or \"Quote\") to order a product that isn't in the catalog yet — it's added to the catalog once the order is received and a sale price is set. currency is only required when every line is a new item; otherwise it's inferred automatically and can be omitted. Does not change stock or the catalog yet — call receive_purchase_order once the goods actually arrive.")]
-    public Task<PurchaseOrderDetail> CreatePurchaseOrder(Guid supplierId, IReadOnlyList<PurchaseOrderLineItem> items, string? currency = null, CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "create_purchase_order"), Description("Creates a purchase order to restock from a supplier: one or more line items with the quantity and unit cost being ordered. For each line, either set catalogItemId to restock an existing item (resolve it via list_catalog_items first — never guess an id), or leave catalogItemId null and supply newItemName + newItemType (\"Stock\", \"TimeBased\", or \"Quote\") to order a product that isn't in the catalog yet — it's added to the catalog once the order is received and a sale price is set. currency is only required when every line is a new item; otherwise it's inferred automatically and can be omitted. expectedDeliveryDate is optional and used only to track whether the order arrives on time. Does not change stock or the catalog yet — call receive_purchase_order once the goods actually arrive.")]
+    public Task<PurchaseOrderDetail> CreatePurchaseOrder(Guid supplierId, IReadOnlyList<PurchaseOrderLineItem> items, string? currency = null, DateTimeOffset? expectedDeliveryDate = null, CancellationToken cancellationToken = default)
     {
         permissionChecker.EnsurePermission(Permission.ManageSuppliers);
-        return purchaseOrderTools.CreatePurchaseOrderAsync(tenantProvider.CurrentBusinessId, supplierId, items, currency, cancellationToken);
+        return purchaseOrderTools.CreatePurchaseOrderAsync(tenantProvider.CurrentBusinessId, supplierId, items, currency, expectedDeliveryDate, cancellationToken);
     }
 
     // linePrices is optional here (unlike the REST endpoint, which still requires a complete list

@@ -37,6 +37,40 @@ public class LedgerPostingService(AiBusinessPlatformDbContext dbContext) : ILedg
         }
     }
 
+    public async Task PostSaleCorrectionAsync(
+        Guid businessId, Guid orderId, PaymentProvider previousProvider, decimal previousAmount,
+        PaymentProvider newProvider, decimal newAmount, decimal vatAmount, string currency,
+        DateTimeOffset postedAt, CancellationToken cancellationToken = default)
+    {
+        if (previousProvider == newProvider && previousAmount == newAmount)
+        {
+            return;
+        }
+
+        var accounts = await EnsureChartOfAccountsAsync(businessId, cancellationToken);
+        var previousRevenue = previousAmount - vatAmount;
+        var newRevenue = newAmount - vatAmount;
+
+        var entry = NewEntry(businessId, currency, "SaleCorrection", orderId, postedAt, $"Payment correction — order {orderId}");
+        dbContext.JournalEntries.Add(entry);
+
+        // Reverse the original PostSaleAsync lines (debit/credit swapped)...
+        dbContext.JournalLines.Add(Line(businessId, entry.Id, accounts[LedgerAccountCodes.CashEquivalentCodeFor(previousProvider)], 0, previousAmount));
+        dbContext.JournalLines.Add(Line(businessId, entry.Id, accounts[LedgerAccountCodes.SalesRevenue], previousRevenue, 0));
+        if (vatAmount > 0)
+        {
+            dbContext.JournalLines.Add(Line(businessId, entry.Id, accounts[LedgerAccountCodes.VatPayable], vatAmount, 0));
+        }
+
+        // ...then post the corrected ones, same shape as PostSaleAsync.
+        dbContext.JournalLines.Add(Line(businessId, entry.Id, accounts[LedgerAccountCodes.CashEquivalentCodeFor(newProvider)], newAmount, 0));
+        dbContext.JournalLines.Add(Line(businessId, entry.Id, accounts[LedgerAccountCodes.SalesRevenue], 0, newRevenue));
+        if (vatAmount > 0)
+        {
+            dbContext.JournalLines.Add(Line(businessId, entry.Id, accounts[LedgerAccountCodes.VatPayable], 0, vatAmount));
+        }
+    }
+
     public async Task PostExpenseAsync(
         Guid businessId, Guid expenseId, ExpenseCategory category, PaymentProvider paymentMethod,
         decimal amount, string currency, DateTimeOffset postedAt, CancellationToken cancellationToken = default)

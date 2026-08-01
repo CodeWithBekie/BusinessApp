@@ -11,6 +11,8 @@ import { semanticColors, spacing, typography } from '@/constants/theme';
 import { useAuth } from '@/src/auth/AuthContext';
 import { useIsOnline } from '@/src/offline/networkStatus';
 import { useHasPermission } from '@/src/auth/permissions';
+import { useConfirm } from '@/src/ui/ConfirmContext';
+import { useToast } from '@/src/ui/ToastContext';
 
 // Section 12.3/19 — stand-in for Meta's real embedded-signup/OAuth flow: the owner pastes in
 // values obtained directly from their Meta dashboard. See WhatsAppOptions/WhatsAppConnectRequest
@@ -18,6 +20,7 @@ import { useHasPermission } from '@/src/auth/permissions';
 function WhatsAppConnectForm() {
   const inputStyle = useInputStyle();
   const isOnline = useIsOnline();
+  const { show: showToast } = useToast();
   const [wabaId, setWabaId] = useState('');
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [systemUserToken, setSystemUserToken] = useState('');
@@ -36,9 +39,12 @@ function WhatsAppConnectForm() {
       const connection = await apiClient.connectWhatsApp(wabaId.trim(), phoneNumberId.trim(), systemUserToken.trim());
       setStatus('saved');
       setMessage(`Connected — status: ${connection.status}`);
+      showToast('WhatsApp connected.', 'success');
     } catch (err) {
+      const errMessage = (err as Error).message;
       setStatus('error');
-      setMessage((err as Error).message);
+      setMessage(errMessage);
+      showToast(errMessage, 'error');
     }
   };
 
@@ -74,6 +80,7 @@ function WhatsAppConnectForm() {
 function PaynowConnectForm() {
   const inputStyle = useInputStyle();
   const isOnline = useIsOnline();
+  const { show: showToast } = useToast();
   const [integrationId, setIntegrationId] = useState('');
   const [integrationKey, setIntegrationKey] = useState('');
   const [notificationEmail, setNotificationEmail] = useState('');
@@ -92,9 +99,12 @@ function PaynowConnectForm() {
       await apiClient.connectPaynow(integrationId.trim(), integrationKey.trim(), notificationEmail.trim());
       setStatus('saved');
       setMessage('Connected.');
+      showToast('Paynow connected.', 'success');
     } catch (err) {
+      const errMessage = (err as Error).message;
       setStatus('error');
-      setMessage((err as Error).message);
+      setMessage(errMessage);
+      showToast(errMessage, 'error');
     }
   };
 
@@ -131,6 +141,7 @@ function PaynowConnectForm() {
 function EcoCashConnectForm() {
   const inputStyle = useInputStyle();
   const isOnline = useIsOnline();
+  const { show: showToast } = useToast();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [merchantCode, setMerchantCode] = useState('');
@@ -161,9 +172,12 @@ function EcoCashConnectForm() {
       });
       setStatus('saved');
       setMessage('Connected.');
+      showToast('EcoCash connected.', 'success');
     } catch (err) {
+      const errMessage = (err as Error).message;
       setStatus('error');
-      setMessage((err as Error).message);
+      setMessage(errMessage);
+      showToast(errMessage, 'error');
     }
   };
 
@@ -279,6 +293,7 @@ function BusinessVisibilityForm() {
 function BusinessDetailsForm() {
   const inputStyle = useInputStyle();
   const isOnline = useIsOnline();
+  const { show: showToast } = useToast();
   const [tin, setTin] = useState('');
   const [vatNumber, setVatNumber] = useState('');
   const [address, setAddress] = useState('');
@@ -338,9 +353,12 @@ function BusinessDetailsForm() {
       });
       setStatus('saved');
       setMessage('Saved.');
+      showToast('Business details saved.', 'success');
     } catch (err) {
+      const errMessage = (err as Error).message;
       setStatus('error');
-      setMessage((err as Error).message);
+      setMessage(errMessage);
+      showToast(errMessage, 'error');
     }
   };
 
@@ -399,6 +417,7 @@ const ROLE_LABELS: Record<BusinessUserRole, string> = {
 function StaffManagementForm() {
   const inputStyle = useInputStyle();
   const isOnline = useIsOnline();
+  const { show: showToast } = useToast();
   const { session } = useAuth();
   const currentUserId = session?.kind === 'business' ? session.businessUserId : null;
 
@@ -436,9 +455,12 @@ function StaffManagementForm() {
       setEmail('');
       setRole('Cashier');
       setInviteResult(result);
+      showToast('Staff member invited.', 'success');
       loadStaff();
     } catch (err) {
-      setInviteError((err as Error).message);
+      const message = (err as Error).message;
+      setInviteError(message);
+      showToast(message, 'error');
     } finally {
       setInviting(false);
     }
@@ -553,6 +575,12 @@ export default function SettingsScreen() {
   const auth = useAuth();
   const canManageBusinessSettings = useHasPermission('ManageBusinessSettings');
   const canManageStaff = useHasPermission('ManageStaff');
+  const { confirm } = useConfirm();
+
+  const handleLogout = async () => {
+    const ok = await confirm({ title: 'Log out?', confirmLabel: 'Log out', destructive: true });
+    if (ok) auth.logout();
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -569,7 +597,7 @@ export default function SettingsScreen() {
           <DocumentUploadForm />
         </>
       )}
-      <Button label="Log out" variant="destructive" style={styles.logoutButton} onPress={auth.logout} />
+      <Button label="Log out" variant="destructive" style={styles.logoutButton} onPress={handleLogout} />
     </ScrollView>
   );
 }

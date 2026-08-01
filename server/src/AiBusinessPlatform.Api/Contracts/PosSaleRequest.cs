@@ -10,7 +10,7 @@ public record QuotationRequest(IReadOnlyList<PosSaleLineItemRequest> Items, Guid
 
 public record RecordPaymentRequest(PaymentProvider Provider, string Reference, decimal Amount);
 
-public record UpdatePaymentProviderRequest(PaymentProvider Provider);
+public record UpdatePaymentRequest(PaymentProvider Provider, decimal Amount);
 
 public record PayOrderWithEcoCashRequest(string PhoneNumber);
 

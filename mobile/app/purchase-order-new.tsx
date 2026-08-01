@@ -1,6 +1,7 @@
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Stack, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Platform, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -8,9 +9,11 @@ import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
 import { apiClient, CatalogItem, CatalogItemType, PurchaseOrderDetail, PurchaseOrderLineItem, Supplier } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
+import { useColorScheme } from '@/components/useColorScheme';
 import { formatMoney } from '@/src/common/format';
 import { semanticColors, spacing, typography } from '@/constants/theme';
 import { useIsOnline } from '@/src/offline/networkStatus';
+import { useToast } from '@/src/ui/ToastContext';
 
 const ITEM_TYPES: CatalogItemType[] = ['Stock', 'TimeBased', 'Quote'];
 
@@ -36,6 +39,73 @@ type CartLine = ExistingCartLine | NewCartLine;
 
 function useInputStyle() {
   return [styles.input, styles.inputLight];
+}
+
+function pad(n: number): string {
+  return n.toString().padStart(2, '0');
+}
+
+// Local date parts, not toISOString() — that converts to UTC and can shift the calendar day
+// picked by the user when their local timezone is behind UTC around midnight.
+function toDateKey(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function formatDisplayDate(date: Date): string {
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+// Native calendar picker, cross-platform: an always-visible native <input type="date"> on web
+// (fastest — no extra tap to open it), a tap-to-open native calendar/spinner dialog elsewhere.
+function DateField({ label, value, onChange }: { label: string; value: Date | null; onChange: (date: Date) => void }) {
+  const colorScheme = useColorScheme();
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const textStyle = colorScheme === 'dark' ? styles.dateInputDark : styles.dateInputLight;
+
+  if (Platform.OS === 'web') {
+    return (
+      <View style={styles.dateFieldFlex} lightColor="transparent" darkColor="transparent">
+        {createElement('input', {
+          type: 'date',
+          value: value ? toDateKey(value) : '',
+          onChange: (e: { target: { value: string } }) => {
+            if (e.target.value) onChange(new Date(`${e.target.value}T00:00:00`));
+          },
+          style: {
+            borderWidth: 1,
+            borderColor: '#ccc',
+            borderRadius: 6,
+            paddingHorizontal: 10,
+            paddingVertical: 8,
+            fontSize: 13,
+            fontFamily: 'inherit',
+            color: colorScheme === 'dark' ? '#fff' : '#000',
+            backgroundColor: 'transparent',
+            width: '100%',
+          },
+        })}
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.dateFieldFlex} lightColor="transparent" darkColor="transparent">
+      <Pressable style={styles.dateInput} onPress={() => setPickerVisible(true)}>
+        <Text style={[textStyle, !value && styles.datePlaceholder]}>{value ? formatDisplayDate(value) : label}</Text>
+      </Pressable>
+      {pickerVisible && (
+        <DateTimePicker
+          value={value ?? new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'inline' : 'default'}
+          onChange={(event, selected) => {
+            setPickerVisible(Platform.OS === 'ios' && event.type !== 'dismissed');
+            if (event.type !== 'dismissed' && selected) onChange(selected);
+          }}
+        />
+      )}
+    </View>
+  );
 }
 
 function SupplierRow({ supplier, onSelect }: { supplier: Supplier; onSelect: () => void }) {
@@ -120,6 +190,7 @@ export default function PurchaseOrderNewScreen() {
   const router = useRouter();
   const inputStyle = useInputStyle();
   const isOnline = useIsOnline();
+  const { show: showToast } = useToast();
 
   const [suppliers, setSuppliers] = useState<Supplier[] | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
@@ -137,6 +208,7 @@ export default function PurchaseOrderNewScreen() {
   const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
   const [customCurrency, setCustomCurrency] = useState('');
   const [showCustomCurrency, setShowCustomCurrency] = useState(false);
+  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState<Date | null>(null);
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -257,15 +329,23 @@ export default function PurchaseOrderNewScreen() {
 
     setSaving(true);
     try {
-      const po = await apiClient.createPurchaseOrder(selectedSupplier.id, lineItems, existingLine ? undefined : currency);
+      const po = await apiClient.createPurchaseOrder(
+        selectedSupplier.id,
+        lineItems,
+        existingLine ? undefined : currency,
+        expectedDeliveryDate ? expectedDeliveryDate.toISOString() : undefined
+      );
       setResult(po);
       setCart({});
+      showToast('Purchase order created.', 'success');
     } catch (err) {
-      setSaveError((err as Error).message);
+      const message = (err as Error).message;
+      setSaveError(message);
+      showToast(message, 'error');
     } finally {
       setSaving(false);
     }
-  }, [selectedSupplier, cartLines, existingLine, currency]);
+  }, [selectedSupplier, cartLines, existingLine, currency, expectedDeliveryDate, showToast]);
 
   return (
     <View style={styles.container}>
@@ -333,6 +413,9 @@ export default function PurchaseOrderNewScreen() {
                   )}
                 </>
               )}
+
+              <Text style={styles.label}>Expected delivery date (optional)</Text>
+              <DateField label="Not set" value={expectedDeliveryDate} onChange={setExpectedDeliveryDate} />
 
               <Text style={styles.label}>Items</Text>
               <TextInput style={inputStyle} placeholder="Search catalog items…" value={itemSearch} onChangeText={setItemSearch} />
@@ -467,4 +550,9 @@ const styles = StyleSheet.create({
   newItemTypeRow: { flexDirection: 'row', gap: spacing.sm },
   newItemActions: { flexDirection: 'row', gap: 12, marginTop: 4 },
   flexButton: { flex: 1 },
+  dateFieldFlex: { flex: 1 },
+  dateInput: { borderWidth: 1, borderColor: '#ccc', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8 },
+  dateInputLight: { color: '#000' },
+  dateInputDark: { color: '#fff' },
+  datePlaceholder: { opacity: 0.5 },
 });

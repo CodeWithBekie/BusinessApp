@@ -1,5 +1,6 @@
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Tools;
+using AiBusinessPlatform.Domain;
 using AiBusinessPlatform.Domain.Entities;
 using AiBusinessPlatform.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -8,7 +9,15 @@ namespace AiBusinessPlatform.Infrastructure.Tools;
 
 public class SupplierTools(AiBusinessPlatformDbContext dbContext, ICurrentTenantProvider tenantProvider) : ISupplierTools
 {
-    private static SupplierSummary ToSummary(Supplier s) => new(s.Id, s.Name, s.ContactPhone, s.Email, s.Notes, s.Active, s.CreatedAt);
+    private static SupplierSummary ToSummary(Supplier s) => new(s.Id, s.Name, s.ContactPhone, s.Email, s.Notes, s.Category, s.Rating, s.Active, s.CreatedAt);
+
+    private static void ValidateRating(int? rating)
+    {
+        if (rating is < 1 or > 5)
+        {
+            throw new ArgumentException("rating must be between 1 and 5.", nameof(rating));
+        }
+    }
 
     public async Task<IReadOnlyList<SupplierSummary>> ListSuppliersAsync(Guid businessId, string? search, CancellationToken cancellationToken = default)
     {
@@ -29,7 +38,7 @@ public class SupplierTools(AiBusinessPlatformDbContext dbContext, ICurrentTenant
     }
 
     public async Task<SupplierSummary> CreateSupplierAsync(
-        Guid businessId, string name, string? contactPhone, string? email, string? notes, CancellationToken cancellationToken = default)
+        Guid businessId, string name, string? contactPhone, string? email, string? notes, SupplierCategory? category, int? rating, CancellationToken cancellationToken = default)
     {
         if (businessId != tenantProvider.CurrentBusinessId)
         {
@@ -38,6 +47,10 @@ public class SupplierTools(AiBusinessPlatformDbContext dbContext, ICurrentTenant
         if (string.IsNullOrWhiteSpace(name))
         {
             throw new ArgumentException("name is required.", nameof(name));
+        }
+        if (rating is not null)
+        {
+            ValidateRating(rating);
         }
 
         var supplier = new Supplier
@@ -48,6 +61,8 @@ public class SupplierTools(AiBusinessPlatformDbContext dbContext, ICurrentTenant
             ContactPhone = string.IsNullOrWhiteSpace(contactPhone) ? null : contactPhone.Trim(),
             Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim(),
             Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim(),
+            Category = category,
+            Rating = rating,
             Active = true,
             CreatedAt = DateTimeOffset.UtcNow
         };
@@ -58,7 +73,7 @@ public class SupplierTools(AiBusinessPlatformDbContext dbContext, ICurrentTenant
     }
 
     public async Task<SupplierSummary> UpdateSupplierAsync(
-        Guid businessId, Guid supplierId, string? name, string? contactPhone, string? email, string? notes, bool? active,
+        Guid businessId, Guid supplierId, string? name, string? contactPhone, string? email, string? notes, SupplierCategory? category, int? rating, bool? active,
         CancellationToken cancellationToken = default)
     {
         if (businessId != tenantProvider.CurrentBusinessId)
@@ -88,6 +103,15 @@ public class SupplierTools(AiBusinessPlatformDbContext dbContext, ICurrentTenant
         if (notes is not null)
         {
             supplier.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+        }
+        if (category is not null)
+        {
+            supplier.Category = category;
+        }
+        if (rating is not null)
+        {
+            ValidateRating(rating);
+            supplier.Rating = rating;
         }
         if (active is not null)
         {

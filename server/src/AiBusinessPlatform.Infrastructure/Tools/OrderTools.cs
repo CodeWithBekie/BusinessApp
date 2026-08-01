@@ -293,12 +293,16 @@ public class OrderTools(
         return await GetOrderAsync(businessId, order.Id, cancellationToken);
     }
 
-    public async Task<OrderDetailSummary> UpdatePaymentProviderAsync(
-        Guid businessId, Guid orderId, PaymentProvider provider, CancellationToken cancellationToken = default)
+    public async Task<OrderDetailSummary> UpdatePaymentAsync(
+        Guid businessId, Guid orderId, PaymentProvider provider, decimal amount, CancellationToken cancellationToken = default)
     {
         if (businessId != tenantProvider.CurrentBusinessId)
         {
             throw new InvalidOperationException("businessId does not match the current tenant context.");
+        }
+        if (amount <= 0)
+        {
+            throw new ArgumentException("amount must be greater than zero.", nameof(amount));
         }
 
         var order = await dbContext.Orders.FirstOrDefaultAsync(o => o.Id == orderId, cancellationToken)
@@ -313,7 +317,14 @@ public class OrderTools(
             ?? throw new InvalidOperationException($"Order {orderId} has no confirmed payment to edit.");
 
         var previousProvider = payment.Provider;
+        var previousAmount = payment.Amount;
+        if (previousProvider == provider && previousAmount == amount)
+        {
+            return await GetOrderAsync(businessId, order.Id, cancellationToken);
+        }
+
         payment.Provider = provider;
+        payment.Amount = amount;
 
         dbContext.AuditLogs.Add(new AuditLog
         {
@@ -321,13 +332,17 @@ public class OrderTools(
             BusinessId = tenantProvider.CurrentBusinessId,
             ActorType = AuditActorType.User,
             ActorId = "dashboard",
-            Action = "payment.provider_updated",
+            Action = "payment.updated",
             EntityType = nameof(Payment),
             EntityId = payment.Id.ToString(),
-            BeforeStateJson = JsonSerializer.Serialize(new { Provider = previousProvider.ToString() }),
-            AfterStateJson = JsonSerializer.Serialize(new { Provider = provider.ToString() }),
+            BeforeStateJson = JsonSerializer.Serialize(new { Provider = previousProvider.ToString(), Amount = previousAmount }),
+            AfterStateJson = JsonSerializer.Serialize(new { Provider = provider.ToString(), Amount = amount }),
             CreatedAt = DateTimeOffset.UtcNow
         });
+
+        await ledgerPostingService.PostSaleCorrectionAsync(
+            businessId, order.Id, previousProvider, previousAmount, provider, amount, order.VatAmount, order.Currency,
+            DateTimeOffset.UtcNow, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 

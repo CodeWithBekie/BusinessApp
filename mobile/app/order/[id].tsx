@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -14,6 +14,8 @@ import { downloadAndShareDocument } from '@/src/documents/downloadAndShare';
 import { formatMoney, ORDER_STATUS_COLORS } from '@/src/orders/orderStatus';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
 import { useIsOnline } from '@/src/offline/networkStatus';
+import { useConfirm } from '@/src/ui/ConfirmContext';
+import { useToast } from '@/src/ui/ToastContext';
 
 const PAYMENT_STATUS_COLORS: Record<string, string> = {
   Pending: semanticColors.warning,
@@ -52,12 +54,13 @@ export default function OrderDetailScreen() {
   const colorScheme = useColorScheme();
   const isOnline = useIsOnline();
   const metaStyle = colorScheme === 'dark' ? styles.metaDark : styles.metaLight;
+  const { confirm } = useConfirm();
+  const { show: showToast } = useToast();
   const fetchOrder = useCallback(() => apiClient.getOrder(id!), [id]);
   const { data: order, error, isFromCache, reload: load } = useCachedFetch<OrderDetail>(`order:${id}`, fetchOrder);
   const [fulfilling, setFulfilling] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [confirmVisible, setConfirmVisible] = useState(false);
   const [downloadingReceipt, setDownloadingReceipt] = useState(false);
 
   const [showRecordPayment, setShowRecordPayment] = useState(false);
@@ -67,9 +70,10 @@ export default function OrderDetailScreen() {
   const [recordingPayment, setRecordingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
 
-  const [showEditProvider, setShowEditProvider] = useState(false);
+  const [showEditPayment, setShowEditPayment] = useState(false);
   const [editProvider, setEditProvider] = useState<OrderPayment['provider']>('Cash');
-  const [updatingProvider, setUpdatingProvider] = useState(false);
+  const [editAmount, setEditAmount] = useState('');
+  const [updatingPayment, setUpdatingPayment] = useState(false);
 
   const [showPayEcoCash, setShowPayEcoCash] = useState(false);
   const [ecocashPhoneNumber, setEcocashPhoneNumber] = useState('');
@@ -89,18 +93,28 @@ export default function OrderDetailScreen() {
 
   const performFulfill = useCallback(async () => {
     if (!order) return;
-    setConfirmVisible(false);
     setActionError(null);
     setFulfilling(true);
     try {
       await apiClient.markOrderFulfilled(order.id);
+      showToast('Order marked as fulfilled.', 'success');
       load();
     } catch (err) {
-      setActionError((err as Error).message);
+      const message = (err as Error).message;
+      setActionError(message);
+      showToast(message, 'error');
     } finally {
       setFulfilling(false);
     }
-  }, [order, load]);
+  }, [order, load, showToast]);
+
+  const confirmFulfill = useCallback(async () => {
+    const ok = await confirm({
+      title: 'Mark as fulfilled?',
+      message: 'This confirms the order has been delivered to the customer.',
+    });
+    if (ok) performFulfill();
+  }, [confirm, performFulfill]);
 
   const performSendInvoice = useCallback(async () => {
     if (!order) return;
@@ -108,13 +122,16 @@ export default function OrderDetailScreen() {
     setInvoicing(true);
     try {
       await apiClient.createInvoice(order.customerId);
+      showToast('Invoice sent.', 'success');
       load();
     } catch (err) {
-      setActionError((err as Error).message);
+      const message = (err as Error).message;
+      setActionError(message);
+      showToast(message, 'error');
     } finally {
       setInvoicing(false);
     }
-  }, [order, load]);
+  }, [order, load, showToast]);
 
   const downloadReceipt = useCallback(async () => {
     if (!order) return;
@@ -153,14 +170,17 @@ export default function OrderDetailScreen() {
     setRecordingPayment(true);
     try {
       await apiClient.recordOrderPayment(order.id, paymentProvider, paymentReference.trim(), parsedAmount);
+      showToast('Payment recorded.', 'success');
       setShowRecordPayment(false);
       load();
     } catch (err) {
-      setPaymentError((err as Error).message);
+      const message = (err as Error).message;
+      setPaymentError(message);
+      showToast(message, 'error');
     } finally {
       setRecordingPayment(false);
     }
-  }, [order, paymentProvider, paymentReference, paymentAmount, load]);
+  }, [order, paymentProvider, paymentReference, paymentAmount, load, showToast]);
 
   const startPayEcoCash = useCallback(() => {
     if (!order) return;
@@ -179,14 +199,17 @@ export default function OrderDetailScreen() {
     setPayingEcoCash(true);
     try {
       await apiClient.payOrderWithEcoCash(order.id, ecocashPhoneNumber.trim());
+      showToast('EcoCash charge initiated.', 'success');
       setShowPayEcoCash(false);
       load();
     } catch (err) {
-      setEcocashError((err as Error).message);
+      const message = (err as Error).message;
+      setEcocashError(message);
+      showToast(message, 'error');
     } finally {
       setPayingEcoCash(false);
     }
-  }, [order, ecocashPhoneNumber, load]);
+  }, [order, ecocashPhoneNumber, load, showToast]);
 
   const startAssignDriver = useCallback(() => {
     if (!order) return;
@@ -201,14 +224,17 @@ export default function OrderDetailScreen() {
     setAssigningDriver(true);
     try {
       await apiClient.assignDeliveryDriver(order.id, driverName.trim() || undefined);
+      showToast('Driver assigned.', 'success');
       setShowAssignDriver(false);
       load();
     } catch (err) {
-      setDriverError((err as Error).message);
+      const message = (err as Error).message;
+      setDriverError(message);
+      showToast(message, 'error');
     } finally {
       setAssigningDriver(false);
     }
-  }, [order, driverName, load]);
+  }, [order, driverName, load, showToast]);
 
   const advanceDeliveryStatus = useCallback(
     async (status: DeliveryInfo['status']) => {
@@ -217,37 +243,49 @@ export default function OrderDetailScreen() {
       setUpdatingDeliveryStatus(true);
       try {
         await apiClient.updateDeliveryStatus(order.id, status);
+        showToast(status === 'Delivered' ? 'Marked as delivered.' : 'Delivery status updated.', 'success');
         load();
       } catch (err) {
-        setDeliveryActionError((err as Error).message);
+        const message = (err as Error).message;
+        setDeliveryActionError(message);
+        showToast(message, 'error');
       } finally {
         setUpdatingDeliveryStatus(false);
       }
     },
-    [order, load]
+    [order, load, showToast]
   );
 
-  const startEditProvider = useCallback(() => {
+  const startEditPayment = useCallback(() => {
     if (!order?.payment) return;
     setEditProvider(order.payment.provider);
-    setShowEditProvider(true);
+    setEditAmount(order.payment.amount.toFixed(2));
+    setShowEditPayment(true);
     setActionError(null);
   }, [order]);
 
-  const submitEditProvider = useCallback(async () => {
+  const submitEditPayment = useCallback(async () => {
     if (!order) return;
+    const parsedAmount = Number(editAmount);
+    if (!editAmount.trim() || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setActionError('Enter a valid amount greater than zero.');
+      return;
+    }
     setActionError(null);
-    setUpdatingProvider(true);
+    setUpdatingPayment(true);
     try {
-      await apiClient.updateOrderPaymentProvider(order.id, editProvider);
-      setShowEditProvider(false);
+      await apiClient.updateOrderPayment(order.id, editProvider, parsedAmount);
+      showToast('Payment updated.', 'success');
+      setShowEditPayment(false);
       load();
     } catch (err) {
-      setActionError((err as Error).message);
+      const message = (err as Error).message;
+      setActionError(message);
+      showToast(message, 'error');
     } finally {
-      setUpdatingProvider(false);
+      setUpdatingPayment(false);
     }
-  }, [order, editProvider, load]);
+  }, [order, editProvider, editAmount, load, showToast]);
 
   const locked = order?.status === 'Fulfilled' || order?.status === 'Cancelled';
   const hasConfirmedPayment = order?.payment?.status === 'Confirmed';
@@ -259,7 +297,7 @@ export default function OrderDetailScreen() {
       {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
       {!error && order === null && <ActivityIndicator style={styles.loading} />}
       {!error && order !== null && (
-        <>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.headerRow} lightColor="transparent" darkColor="transparent">
             <Badge label={order.status} color={ORDER_STATUS_COLORS[order.status]} />
             <Text style={[styles.updatedAt, metaStyle]}>Updated {new Date(order.updatedAt).toLocaleString()}</Text>
@@ -302,27 +340,36 @@ export default function OrderDetailScreen() {
                 <Text style={styles.rowPrimary}>{order.payment.provider}</Text>
                 <Badge label={order.payment.status} color={PAYMENT_STATUS_COLORS[order.payment.status] ?? semanticColors.neutral} />
               </View>
+              <Text style={[styles.rowSecondary, metaStyle]}>Amount: {formatMoney(order.payment.amount, order.currency)}</Text>
               <Text style={[styles.rowSecondary, metaStyle]}>Ref: {order.payment.providerReference}</Text>
               {order.payment.confirmedAt && (
                 <Text style={[styles.rowSecondary, metaStyle]}>Confirmed {new Date(order.payment.confirmedAt).toLocaleString()}</Text>
               )}
 
-              {hasConfirmedPayment && !locked && !showEditProvider && (
-                <Pressable style={styles.inlineEditButton} onPress={startEditProvider} disabled={!isOnline}>
-                  <Text style={[styles.inlineEditButtonText, !isOnline && styles.buttonDisabled]}>Edit provider</Text>
+              {hasConfirmedPayment && !locked && !showEditPayment && (
+                <Pressable style={styles.inlineEditButton} onPress={startEditPayment} disabled={!isOnline}>
+                  <Text style={[styles.inlineEditButtonText, !isOnline && styles.buttonDisabled]}>Edit payment</Text>
                 </Pressable>
               )}
 
-              {showEditProvider && (
+              {showEditPayment && (
                 <View style={styles.inlineForm} lightColor="transparent" darkColor="transparent">
                   <ProviderChips value={editProvider} onChange={setEditProvider} />
+                  <Text style={[styles.rowSecondary, metaStyle]}>Amount ({order.currency})</Text>
+                  <TextInput
+                    style={[styles.input, colorScheme === 'dark' ? styles.inputDark : styles.inputLight]}
+                    placeholder={order.payment.amount.toFixed(2)}
+                    value={editAmount}
+                    onChangeText={setEditAmount}
+                    keyboardType="decimal-pad"
+                  />
                   <View style={styles.inlineFormActions} lightColor="transparent" darkColor="transparent">
-                    <Button label="Cancel" variant="secondary" style={styles.inlineFormButton} onPress={() => setShowEditProvider(false)} disabled={updatingProvider} />
+                    <Button label="Cancel" variant="secondary" style={styles.inlineFormButton} onPress={() => setShowEditPayment(false)} disabled={updatingPayment} />
                     <Button
-                      label={updatingProvider ? 'Saving…' : 'Save'}
+                      label={updatingPayment ? 'Saving…' : 'Save'}
                       style={styles.inlineFormButton}
-                      disabled={updatingProvider || !isOnline}
-                      onPress={submitEditProvider}
+                      disabled={updatingPayment || !isOnline}
+                      onPress={submitEditPayment}
                     />
                   </View>
                 </View>
@@ -493,30 +540,18 @@ export default function OrderDetailScreen() {
             <Button
               label={fulfilling ? 'Marking fulfilled…' : 'Mark as fulfilled'}
               disabled={fulfilling || !isOnline}
-              onPress={() => setConfirmVisible(true)}
+              onPress={confirmFulfill}
             />
           )}
-        </>
+        </ScrollView>
       )}
-
-      <Modal visible={confirmVisible} transparent animationType="fade" onRequestClose={() => setConfirmVisible(false)}>
-        <View style={styles.modalOverlay} lightColor="rgba(0,0,0,0.4)" darkColor="rgba(0,0,0,0.6)">
-          <View style={styles.modalCard} lightColor="#fff" darkColor="#1c1c1e">
-            <Text style={styles.modalTitle}>Mark as fulfilled?</Text>
-            <Text style={[styles.modalBody, metaStyle]}>This confirms the order has been delivered to the customer.</Text>
-            <View style={styles.modalActions} lightColor="transparent" darkColor="transparent">
-              <Button label="Cancel" variant="secondary" style={styles.modalButton} onPress={() => setConfirmVisible(false)} />
-              <Button label="Mark fulfilled" style={styles.modalButton} onPress={performFulfill} />
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 32 },
+  container: { flex: 1, paddingTop: 16 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 32 },
   loading: { marginTop: 40 },
   error: { color: semanticColors.danger, marginBottom: 12 },
   cacheNote: { opacity: 0.6, fontSize: 12, marginBottom: 12 },
@@ -545,10 +580,4 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
   inputLight: { color: '#000' },
   inputDark: { color: '#fff' },
-  modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  modalCard: { width: '100%', maxWidth: 360, borderRadius: 12, padding: 20 },
-  modalTitle: { fontSize: 17, fontWeight: '700', marginBottom: 8 },
-  modalBody: { fontSize: 14, marginBottom: 20 },
-  modalActions: { flexDirection: 'row', gap: 12 },
-  modalButton: { flex: 1 },
 });

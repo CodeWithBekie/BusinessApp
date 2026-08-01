@@ -1,7 +1,7 @@
 import { SymbolView } from 'expo-symbols';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
 
 import { apiClient, MarketplaceOrderResult } from '@/src/api/client';
 import { Text, View } from '@/components/Themed';
@@ -11,6 +11,7 @@ import { semanticColors } from '@/constants/theme';
 import { useColorScheme } from '@/components/useColorScheme';
 import { formatMoney } from '@/src/common/format';
 import { useIsOnline } from '@/src/offline/networkStatus';
+import { useToast } from '@/src/ui/ToastContext';
 
 interface CheckoutLine {
   catalogItemId: string;
@@ -26,6 +27,7 @@ export default function CheckoutScreen() {
   const isOnline = useIsOnline();
   const colorScheme = useColorScheme();
   const tint = Colors[colorScheme].tint;
+  const { show: showToast } = useToast();
 
   const lines = useMemo<CheckoutLine[]>(() => {
     try {
@@ -62,25 +64,30 @@ export default function CheckoutScreen() {
         lines.map((line) => ({ catalogItemId: line.catalogItemId, quantity: line.quantity }))
       );
       setResult(order);
+      showToast('Order placed.', 'success');
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      setError(message);
+      showToast(message, 'error');
     } finally {
       setPlacing(false);
     }
-  }, [businessId, lines]);
+  }, [businessId, lines, showToast]);
 
   if (result) {
     return (
       <View style={styles.container}>
         <Stack.Screen options={{ title: 'Order placed' }} />
-        <View style={styles.successBanner} lightColor="#e8f5e9" darkColor="rgba(46,125,50,0.2)">
-          <SymbolView name={{ ios: 'checkmark.circle.fill', android: 'code', web: 'code' }} tintColor={semanticColors.success} size={40} style={styles.successIcon} />
-          <Text style={styles.successTitle}>Order placed — {formatMoney(result.totalAmount, result.currency)}</Text>
-          <Text style={styles.successMeta}>From: {result.businessName}</Text>
-          <Text style={styles.successMeta}>Reference: {result.paymentReference}</Text>
-          {result.paymentInstructions && <Text style={styles.successMeta}>{result.paymentInstructions}</Text>}
-        </View>
-        <Button label="View my orders" variant="success" onPress={() => router.replace('/(customer)/orders')} style={styles.doneButton} />
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.successBanner} lightColor="#e8f5e9" darkColor="rgba(46,125,50,0.2)">
+            <SymbolView name={{ ios: 'checkmark.circle.fill', android: 'code', web: 'code' }} tintColor={semanticColors.success} size={40} style={styles.successIcon} />
+            <Text style={styles.successTitle}>Order placed — {formatMoney(result.totalAmount, result.currency)}</Text>
+            <Text style={styles.successMeta}>From: {result.businessName}</Text>
+            <Text style={styles.successMeta}>Reference: {result.paymentReference}</Text>
+            {result.paymentInstructions && <Text style={styles.successMeta}>{result.paymentInstructions}</Text>}
+          </View>
+          <Button label="View my orders" variant="success" onPress={() => router.replace('/(customer)/orders')} style={styles.doneButton} />
+        </ScrollView>
       </View>
     );
   }
@@ -88,47 +95,50 @@ export default function CheckoutScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ title: 'Checkout' }} />
-      <Text style={styles.sectionTitle}>Order summary</Text>
-      {lines.map((line) => (
-        <View key={line.catalogItemId} style={styles.lineRow} lightColor="transparent" darkColor="transparent">
-          <Text style={styles.lineName} numberOfLines={1}>
-            {line.quantity} × {line.name}
-          </Text>
-          <Text style={styles.lineSubtotal}>{formatMoney(line.price * line.quantity, line.currency)}</Text>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <Text style={styles.sectionTitle}>Order summary</Text>
+        {lines.map((line) => (
+          <View key={line.catalogItemId} style={styles.lineRow} lightColor="transparent" darkColor="transparent">
+            <Text style={styles.lineName} numberOfLines={1}>
+              {line.quantity} × {line.name}
+            </Text>
+            <Text style={styles.lineSubtotal}>{formatMoney(line.price * line.quantity, line.currency)}</Text>
+          </View>
+        ))}
+        {vatRate > 0 && (
+          <>
+            <View style={styles.lineRow} lightColor="transparent" darkColor="transparent">
+              <Text style={styles.lineName}>Subtotal</Text>
+              <Text style={styles.lineSubtotal}>{formatMoney(total, currency)}</Text>
+            </View>
+            <View style={styles.lineRow} lightColor="transparent" darkColor="transparent">
+              <Text style={styles.lineName}>VAT ({(vatRate * 100).toFixed(vatRate * 100 % 1 === 0 ? 0 : 2)}%)</Text>
+              <Text style={styles.lineSubtotal}>{formatMoney(vatAmount, currency)}</Text>
+            </View>
+          </>
+        )}
+        <View style={styles.totalRow} lightColor="transparent" darkColor="transparent">
+          <Text style={styles.totalLabel}>Total</Text>
+          <Text style={[styles.totalValue, { color: tint }]}>{formatMoney(grandTotal, currency)}</Text>
         </View>
-      ))}
-      {vatRate > 0 && (
-        <>
-          <View style={styles.lineRow} lightColor="transparent" darkColor="transparent">
-            <Text style={styles.lineName}>Subtotal</Text>
-            <Text style={styles.lineSubtotal}>{formatMoney(total, currency)}</Text>
-          </View>
-          <View style={styles.lineRow} lightColor="transparent" darkColor="transparent">
-            <Text style={styles.lineName}>VAT ({(vatRate * 100).toFixed(vatRate * 100 % 1 === 0 ? 0 : 2)}%)</Text>
-            <Text style={styles.lineSubtotal}>{formatMoney(vatAmount, currency)}</Text>
-          </View>
-        </>
-      )}
-      <View style={styles.totalRow} lightColor="transparent" darkColor="transparent">
-        <Text style={styles.totalLabel}>Total</Text>
-        <Text style={[styles.totalValue, { color: tint }]}>{formatMoney(grandTotal, currency)}</Text>
-      </View>
 
-      {error && <Text style={styles.error}>{error}</Text>}
-      {!isOnline && <Text style={styles.error}>You're offline — connect to place this order.</Text>}
+        {error && <Text style={styles.error}>{error}</Text>}
+        {!isOnline && <Text style={styles.error}>You're offline — connect to place this order.</Text>}
 
-      <Button
-        label={placing ? 'Placing order…' : 'Place order'}
-        disabled={placing || !isOnline || lines.length === 0}
-        onPress={placeOrder}
-        style={styles.placeButton}
-      />
+        <Button
+          label={placing ? 'Placing order…' : 'Place order'}
+          disabled={placing || !isOnline || lines.length === 0}
+          onPress={placeOrder}
+          style={styles.placeButton}
+        />
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 24 },
+  container: { flex: 1, paddingTop: 16 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 24 },
   sectionTitle: { fontSize: 15, fontWeight: '700', marginBottom: 12 },
   lineRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 },
   lineName: { fontSize: 14, flexShrink: 1 },

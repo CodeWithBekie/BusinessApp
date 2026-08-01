@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
@@ -13,6 +13,8 @@ import Colors from '@/constants/Colors';
 import { radius, semanticColors, spacing } from '@/constants/theme';
 import { CATALOG_ITEM_TYPE_LABELS, CATALOG_ITEM_TYPES } from '@/src/catalog/catalogItemType';
 import { useIsOnline } from '@/src/offline/networkStatus';
+import { useConfirm } from '@/src/ui/ConfirmContext';
+import { useToast } from '@/src/ui/ToastContext';
 
 function useInputStyle() {
   const colorScheme = useColorScheme();
@@ -27,6 +29,8 @@ export default function CatalogItemScreen() {
   const colorScheme = useColorScheme();
   const tint = Colors[colorScheme].tint;
   const isNew = id === 'new';
+  const { confirm } = useConfirm();
+  const { show: showToast } = useToast();
 
   const [loading, setLoading] = useState(!isNew);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -121,13 +125,16 @@ export default function CatalogItemScreen() {
           lowStockThreshold: itemType === 'Stock' ? parsedThreshold : undefined,
         });
       }
+      showToast(isNew ? 'Item added.' : 'Item saved.', 'success');
       router.back();
     } catch (err) {
-      setSaveError((err as Error).message);
+      const message = (err as Error).message;
+      setSaveError(message);
+      showToast(message, 'error');
     } finally {
       setSaving(false);
     }
-  }, [isNew, id, name, code, itemType, price, currency, unit, stockQuantity, lowStockThreshold, router]);
+  }, [isNew, id, name, code, itemType, price, currency, unit, stockQuantity, lowStockThreshold, router, showToast]);
 
   const toggleActive = useCallback(async () => {
     if (!existing) return;
@@ -136,12 +143,29 @@ export default function CatalogItemScreen() {
     try {
       const updated = await apiClient.updateCatalogItem(existing.id, { active: !existing.active });
       setExisting(updated);
+      showToast(updated.active ? 'Item reactivated.' : 'Item deactivated.', 'success');
     } catch (err) {
-      setSaveError((err as Error).message);
+      const message = (err as Error).message;
+      setSaveError(message);
+      showToast(message, 'error');
     } finally {
       setTogglingActive(false);
     }
-  }, [existing]);
+  }, [existing, showToast]);
+
+  const handleToggleActive = useCallback(async () => {
+    if (!existing) return;
+    if (existing.active) {
+      const ok = await confirm({
+        title: 'Deactivate this item?',
+        message: `${existing.name} won't be visible in the catalog until reactivated.`,
+        confirmLabel: 'Deactivate',
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    toggleActive();
+  }, [existing, confirm, toggleActive]);
 
   const pickImage = useCallback(
     async (source: 'library' | 'camera') => {
@@ -196,7 +220,7 @@ export default function CatalogItemScreen() {
       {loading && <ActivityIndicator style={styles.loading} />}
       {loadError && <Text style={styles.error}>{loadError}</Text>}
       {!loading && !loadError && (
-        <>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           {!isNew && existing && (
             <Section title="Photo">
               <View style={styles.photoRow} lightColor="transparent" darkColor="transparent">
@@ -286,19 +310,20 @@ export default function CatalogItemScreen() {
               <Button
                 label={togglingActive ? 'Updating…' : existing.active ? 'Deactivate item' : 'Reactivate item'}
                 variant={existing.active ? 'destructive' : 'secondary'}
-                onPress={toggleActive}
+                onPress={handleToggleActive}
                 disabled={togglingActive || !isOnline}
               />
             </View>
           )}
-        </>
+        </ScrollView>
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 32 },
+  container: { flex: 1, paddingTop: 16 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 32 },
   loading: { marginTop: 40 },
   error: { color: semanticColors.danger, marginTop: 8, marginBottom: 8 },
   label: { fontSize: 13, fontWeight: '600', opacity: 0.7, marginTop: spacing.md, marginBottom: spacing.xs + 2 },

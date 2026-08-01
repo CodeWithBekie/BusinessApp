@@ -38,4 +38,6 @@ public enum PurchaseOrderStatus { Draft, Ordered, Received, Cancelled }
 
 public enum ExpenseCategory { Rent, Utilities, Wages, Supplies, Transport, Marketing, Other }
 
+public enum SupplierCategory { Materials, Equipment, Services, Logistics, Utilities, Other }
+
 public enum AccountType { Asset, Liability, Equity, Revenue, Expense }

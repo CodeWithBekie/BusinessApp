@@ -9,19 +9,22 @@ interface ChipProps {
   label: string;
   active: boolean;
   onPress: () => void;
+  onLongPress?: () => void;
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
 // Replaces every screen's own `filterChip`/`filterChipActive` pair with one shared filter/selector
-// pill.
-export function Chip({ label, active, onPress, disabled, style }: ChipProps) {
+// pill. onLongPress is optional — e.g. a saved-filter-preset chip uses it for delete, so a single
+// Pressable handles both gestures instead of nesting one inside a ContextMenu's own Pressable.
+export function Chip({ label, active, onPress, onLongPress, disabled, style }: ChipProps) {
   const colorScheme = useColorScheme();
   const tint = Colors[colorScheme].tint;
 
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       disabled={disabled}
       style={[styles.chip, active && { backgroundColor: tint, borderColor: tint }, disabled && styles.disabled, style]}
     >

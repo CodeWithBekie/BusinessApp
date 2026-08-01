@@ -29,6 +29,8 @@ import { formatMoney } from '@/src/common/format';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
 import { useIsOnline } from '@/src/offline/networkStatus';
 import { useHasPermission } from '@/src/auth/permissions';
+import { useConfirm } from '@/src/ui/ConfirmContext';
+import { useToast } from '@/src/ui/ToastContext';
 
 type Section = 'sales' | 'pnl' | 'cashup' | 'cashflow' | 'ledger' | 'expenses';
 
@@ -647,6 +649,8 @@ const EXPENSE_PAYMENT_METHODS: readonly PosPaymentMethod[] = ['Cash', 'EcoCash',
 function ExpensesSection() {
   const inputStyle = useInputStyle();
   const isOnline = useIsOnline();
+  const { confirm } = useConfirm();
+  const { show: showToast } = useToast();
   const fetchExpenses = useCallback(() => apiClient.getExpenses(), []);
   const { data: expenses, error, refreshing, isFromCache, reload: load } = useCachedFetch<ExpenseSummary[]>('expenses', fetchExpenses);
 
@@ -677,9 +681,12 @@ function ExpensesSection() {
       await apiClient.createExpense(input);
       setDescription('');
       setAmount('');
+      showToast('Expense added.', 'success');
       load();
     } catch (err) {
-      setFormError((err as Error).message);
+      const message = (err as Error).message;
+      setFormError(message);
+      showToast(message, 'error');
     } finally {
       setSaving(false);
     }
@@ -689,12 +696,25 @@ function ExpensesSection() {
     setDeletingId(id);
     try {
       await apiClient.deleteExpense(id);
+      showToast('Expense deleted.', 'success');
       load();
     } catch (err) {
-      setFormError((err as Error).message);
+      const message = (err as Error).message;
+      setFormError(message);
+      showToast(message, 'error');
     } finally {
       setDeletingId(null);
     }
+  };
+
+  const confirmRemove = async (id: string, description: string) => {
+    const ok = await confirm({
+      title: 'Delete this expense?',
+      message: `"${description}" will be permanently removed.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (ok) remove(id);
   };
 
   return (
@@ -720,7 +740,7 @@ function ExpensesSection() {
               label="Delete"
               variant="destructive"
               disabled={deletingId === expense.id || !isOnline}
-              onPress={() => remove(expense.id)}
+              onPress={() => confirmRemove(expense.id, expense.description)}
               style={styles.expenseDeleteButton}
             />
           </View>

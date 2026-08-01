@@ -8,6 +8,8 @@ public class Supplier : ITenantScoped
     public string? ContactPhone { get; set; }
     public string? Email { get; set; }
     public string? Notes { get; set; }
+    public SupplierCategory? Category { get; set; }
+    public int? Rating { get; set; }
     public bool Active { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; }
 }

@@ -130,10 +130,12 @@ public interface IOrderTools
     [Description("Manually records and confirms the payment for an order that isn't Paid yet — use when a customer paid by cash, bank transfer, or another method outside the automated payment gateway. Sets the provider, reference, and amount, marks the payment Confirmed, and transitions the order to Paid regardless of how the amount compares to the order total (e.g. an agreed discount or rounding adjustment) — this does not support partial/installment payments, the order is always fully Paid after this call. provider must be \"Cash\", \"EcoCash\", \"Bank\", or \"Other\". amount must be greater than zero. Fails if the order is already Paid, Fulfilled, or Cancelled.")]
     Task<OrderDetailSummary> RecordManualPaymentAsync(Guid businessId, Guid orderId, PaymentProvider provider, string reference, decimal amount, CancellationToken cancellationToken = default);
 
-    // Deliberately narrow — only the provider is editable (confirmed with the user), not the
-    // reference or status; correcting those isn't supported. Fulfilled/Cancelled orders are locked.
-    [Description("Corrects the payment method on an order's already-confirmed payment — e.g. it was logged as Cash but was actually a Bank transfer. provider must be \"Cash\", \"EcoCash\", \"Bank\", or \"Other\". Fails if the order has no confirmed payment yet, or is Fulfilled/Cancelled.")]
-    Task<OrderDetailSummary> UpdatePaymentProviderAsync(Guid businessId, Guid orderId, PaymentProvider provider, CancellationToken cancellationToken = default);
+    // Reference and status remain immutable — correcting those isn't supported. Fulfilled/Cancelled
+    // orders are locked. Posts a correcting ledger entry (ILedgerPostingService.
+    // PostSaleCorrectionAsync) so Trial Balance/General Ledger/Cash Flow stay consistent with the
+    // corrected Payment row, which Sales/P&L/Cash Up already read live.
+    [Description("Corrects the payment method and/or amount on an order's already-confirmed payment — e.g. it was logged as Cash but was actually a Bank transfer, or the amount was mistyped. provider must be \"Cash\", \"EcoCash\", \"Bank\", or \"Other\". amount must be greater than zero. Fails if the order has no confirmed payment yet, or is Fulfilled/Cancelled.")]
+    Task<OrderDetailSummary> UpdatePaymentAsync(Guid businessId, Guid orderId, PaymentProvider provider, decimal amount, CancellationToken cancellationToken = default);
 
     // New ground — lets the business owner explicitly (re-)charge a customer's phone number via
     // EcoCash for an Invoiced order, e.g. when the invoice-time auto-attempt used a synthetic or

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using AiBusinessPlatform.Application.Abstractions;
 using AiBusinessPlatform.Application.Auth;
 using AiBusinessPlatform.Application.Tools;
+using AiBusinessPlatform.Domain;
 using ModelContextProtocol.Server;
 
 namespace AiBusinessPlatform.Mcp.Tools;
@@ -17,10 +18,10 @@ public class SupplierMcpTools(ISupplierTools supplierTools, ICurrentTenantProvid
     public Task<IReadOnlyList<SupplierSummary>> ListSuppliers(string? search = null, CancellationToken cancellationToken = default)
         => supplierTools.ListSuppliersAsync(tenantProvider.CurrentBusinessId, search, cancellationToken);
 
-    [McpServerTool(Name = "create_supplier"), Description("Adds a new supplier this business buys stock from. Check list_suppliers first to avoid creating a duplicate.")]
-    public Task<SupplierSummary> CreateSupplier(string name, string? contactPhone = null, string? email = null, string? notes = null, CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "create_supplier"), Description("Adds a new supplier this business buys stock from. Check list_suppliers first to avoid creating a duplicate. category is one of Materials, Equipment, Services, Logistics, Utilities, Other. rating is 1-5.")]
+    public Task<SupplierSummary> CreateSupplier(string name, string? contactPhone = null, string? email = null, string? notes = null, SupplierCategory? category = null, int? rating = null, CancellationToken cancellationToken = default)
     {
         permissionChecker.EnsurePermission(Permission.ManageSuppliers);
-        return supplierTools.CreateSupplierAsync(tenantProvider.CurrentBusinessId, name, contactPhone, email, notes, cancellationToken);
+        return supplierTools.CreateSupplierAsync(tenantProvider.CurrentBusinessId, name, contactPhone, email, notes, category, rating, cancellationToken);
     }
 }

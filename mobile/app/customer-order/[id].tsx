@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, TextInput } from 'react-native';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { apiClient, MarketplaceOrderDetail, OrderStatus } from '@/src/api/client';
@@ -18,6 +18,8 @@ import { colorFor, initialsFor } from '@/src/marketplace/avatar';
 import { formatMoney, ORDER_STATUS_COLORS } from '@/src/orders/orderStatus';
 import { useCachedFetch } from '@/src/offline/useCachedFetch';
 import { useIsOnline } from '@/src/offline/networkStatus';
+import { useConfirm } from '@/src/ui/ConfirmContext';
+import { useToast } from '@/src/ui/ToastContext';
 
 const PAYMENT_STATUS_COLORS: Record<string, string> = {
   Pending: semanticColors.warning,
@@ -91,13 +93,14 @@ export default function MyOrderDetailScreen() {
   const isOnline = useIsOnline();
   const metaStyle = isDark ? styles.metaDark : styles.metaLight;
   const inputStyle = [styles.input, isDark ? styles.inputDark : styles.inputLight];
+  const { confirm } = useConfirm();
+  const { show: showToast } = useToast();
 
   const fetchOrder = useCallback(() => apiClient.getMyMarketplaceOrder(id!), [id]);
   const { data: order, error, isFromCache, reload: load } = useCachedFetch<MarketplaceOrderDetail>(`customer-order:${id}`, fetchOrder);
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
-  const [confirmCancelVisible, setConfirmCancelVisible] = useState(false);
 
   const [showRequestCancellation, setShowRequestCancellation] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
@@ -117,18 +120,31 @@ export default function MyOrderDetailScreen() {
 
   const performCancel = useCallback(async () => {
     if (!order) return;
-    setConfirmCancelVisible(false);
     setActionError(null);
     setCancelling(true);
     try {
       await apiClient.cancelMyOrder(order.orderId);
+      showToast('Order cancelled.', 'success');
       load();
     } catch (err) {
-      setActionError((err as Error).message);
+      const message = (err as Error).message;
+      setActionError(message);
+      showToast(message, 'error');
     } finally {
       setCancelling(false);
     }
-  }, [order, load]);
+  }, [order, load, showToast]);
+
+  const confirmCancel = useCallback(async () => {
+    const ok = await confirm({
+      title: 'Cancel this order?',
+      message: "This can't be undone — you'll need to place a new order if you change your mind.",
+      confirmLabel: 'Cancel order',
+      cancelLabel: 'Keep order',
+      destructive: true,
+    });
+    if (ok) performCancel();
+  }, [confirm, performCancel]);
 
   const submitRequestCancellation = useCallback(async () => {
     if (!order) return;
@@ -136,14 +152,17 @@ export default function MyOrderDetailScreen() {
     setRequestingCancellation(true);
     try {
       await apiClient.requestMyOrderCancellation(order.orderId, cancellationReason.trim() || undefined);
+      showToast('Cancellation request sent.', 'success');
       setShowRequestCancellation(false);
       load();
     } catch (err) {
-      setActionError((err as Error).message);
+      const message = (err as Error).message;
+      setActionError(message);
+      showToast(message, 'error');
     } finally {
       setRequestingCancellation(false);
     }
-  }, [order, cancellationReason, load]);
+  }, [order, cancellationReason, load, showToast]);
 
   const submitPayEcoCash = useCallback(async () => {
     if (!order) return;
@@ -156,14 +175,17 @@ export default function MyOrderDetailScreen() {
     try {
       const result = await apiClient.payWithEcoCash(order.orderId, ecocashPhoneNumber.trim());
       setEcocashResult({ instructions: result.instructions });
+      showToast('EcoCash payment initiated.', 'success');
       setShowPayEcoCash(false);
       load();
     } catch (err) {
-      setActionError((err as Error).message);
+      const message = (err as Error).message;
+      setActionError(message);
+      showToast(message, 'error');
     } finally {
       setPayingEcoCash(false);
     }
-  }, [order, ecocashPhoneNumber, load]);
+  }, [order, ecocashPhoneNumber, load, showToast]);
 
   const pickAndUploadProof = useCallback(async () => {
     if (!order) return;
@@ -181,13 +203,16 @@ export default function MyOrderDetailScreen() {
     try {
       await apiClient.submitPaymentProof(order.orderId, asset.uri, asset.mimeType ?? 'image/jpeg');
       setProofSubmitted(true);
+      showToast('Payment proof submitted.', 'success');
       load();
     } catch (err) {
-      setActionError((err as Error).message);
+      const message = (err as Error).message;
+      setActionError(message);
+      showToast(message, 'error');
     } finally {
       setUploadingProof(false);
     }
-  }, [order, load]);
+  }, [order, load, showToast]);
 
   return (
     <View style={styles.container}>
@@ -340,7 +365,7 @@ export default function MyOrderDetailScreen() {
               label={cancelling ? 'Cancelling…' : 'Cancel order'}
               variant="destructive"
               disabled={cancelling || !isOnline}
-              onPress={() => setConfirmCancelVisible(true)}
+              onPress={confirmCancel}
               style={styles.destructiveButton}
             />
           )}
@@ -378,19 +403,6 @@ export default function MyOrderDetailScreen() {
           <Text style={[styles.createdAt, metaStyle]}>Order placed {new Date(order.createdAt).toLocaleString()}</Text>
         </ScrollView>
       )}
-
-      <Modal visible={confirmCancelVisible} transparent animationType="fade" onRequestClose={() => setConfirmCancelVisible(false)}>
-        <View style={styles.modalOverlay} lightColor="rgba(0,0,0,0.4)" darkColor="rgba(0,0,0,0.6)">
-          <View style={styles.modalCard} lightColor="#fff" darkColor="#1c1c1e">
-            <Text style={styles.modalTitle}>Cancel this order?</Text>
-            <Text style={[styles.modalBody, metaStyle]}>This can't be undone — you'll need to place a new order if you change your mind.</Text>
-            <View style={styles.modalActions} lightColor="transparent" darkColor="transparent">
-              <Button label="Keep order" variant="secondary" onPress={() => setConfirmCancelVisible(false)} style={styles.modalButton} />
-              <Button label="Cancel order" variant="destructive" onPress={performCancel} style={styles.modalButton} />
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -439,10 +451,4 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
   inputLight: { color: '#000' },
   inputDark: { color: '#fff' },
-  modalOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  modalCard: { width: '100%', maxWidth: 360, borderRadius: 16, padding: 22 },
-  modalTitle: { fontSize: 17, fontWeight: '700', marginBottom: 8 },
-  modalBody: { fontSize: 14, marginBottom: 20, lineHeight: 20 },
-  modalActions: { flexDirection: 'row', gap: 12 },
-  modalButton: { flex: 1 },
 });

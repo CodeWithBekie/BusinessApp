@@ -307,8 +307,8 @@ export const apiClient = {
   markOrderFulfilled: (id: string) => request<OrderFulfillmentResult>(`/api/orders/${id}/fulfill`, { method: 'POST' }),
   recordOrderPayment: (id: string, provider: OrderPayment['provider'], reference: string, amount: number) =>
     request<OrderDetail>(`/api/orders/${id}/payment`, { method: 'POST', body: JSON.stringify({ provider, reference, amount }) }),
-  updateOrderPaymentProvider: (id: string, provider: OrderPayment['provider']) =>
-    request<OrderDetail>(`/api/orders/${id}/payment`, { method: 'PATCH', body: JSON.stringify({ provider }) }),
+  updateOrderPayment: (id: string, provider: OrderPayment['provider'], amount: number) =>
+    request<OrderDetail>(`/api/orders/${id}/payment`, { method: 'PATCH', body: JSON.stringify({ provider, amount }) }),
   payOrderWithEcoCash: (id: string, phoneNumber: string) =>
     request<OrderDetail>(`/api/orders/${id}/pay/ecocash`, { method: 'POST', body: JSON.stringify({ phoneNumber }) }),
   assignDeliveryDriver: (id: string, driverName?: string) =>
@@ -368,8 +368,8 @@ export const apiClient = {
   getPurchaseOrders: (status?: PurchaseOrderStatus) =>
     request<PurchaseOrderSummary[]>(`/api/purchase-orders${status ? `?status=${status}` : ''}`),
   getPurchaseOrder: (id: string) => request<PurchaseOrderDetail>(`/api/purchase-orders/${id}`),
-  createPurchaseOrder: (supplierId: string, items: PurchaseOrderLineItem[], currency?: string) =>
-    request<PurchaseOrderDetail>('/api/purchase-orders', { method: 'POST', body: JSON.stringify({ supplierId, items, currency }) }),
+  createPurchaseOrder: (supplierId: string, items: PurchaseOrderLineItem[], currency?: string, expectedDeliveryDate?: string) =>
+    request<PurchaseOrderDetail>('/api/purchase-orders', { method: 'POST', body: JSON.stringify({ supplierId, items, currency, expectedDeliveryDate }) }),
   receivePurchaseOrder: (id: string, linePrices?: ReceivedLinePrice[]) =>
     request<PurchaseOrderDetail>(`/api/purchase-orders/${id}/receive`, {
       method: 'POST',
@@ -902,12 +902,16 @@ export interface EcoCashConnection {
   createdAt: string;
 }
 
+export type SupplierCategory = 'Materials' | 'Equipment' | 'Services' | 'Logistics' | 'Utilities' | 'Other';
+
 export interface Supplier {
   id: string;
   name: string;
   contactPhone: string | null;
   email: string | null;
   notes: string | null;
+  category: SupplierCategory | null;
+  rating: number | null;
   active: boolean;
   createdAt: string;
 }
@@ -917,6 +921,8 @@ export interface CreateSupplierInput {
   contactPhone?: string;
   email?: string;
   notes?: string;
+  category?: SupplierCategory;
+  rating?: number;
 }
 
 export interface UpdateSupplierInput {
@@ -924,6 +930,8 @@ export interface UpdateSupplierInput {
   contactPhone?: string;
   email?: string;
   notes?: string;
+  category?: SupplierCategory;
+  rating?: number;
   active?: boolean;
 }
 
@@ -967,6 +975,7 @@ export interface PurchaseOrderSummary {
   createdAt: string;
   updatedAt: string;
   receivedAt: string | null;
+  expectedDeliveryDate: string | null;
 }
 
 export interface PurchaseOrderDetail {
@@ -982,6 +991,7 @@ export interface PurchaseOrderDetail {
   createdAt: string;
   updatedAt: string;
   receivedAt: string | null;
+  expectedDeliveryDate: string | null;
 }
 
 export type ExpenseCategory = 'Rent' | 'Utilities' | 'Wages' | 'Supplies' | 'Transport' | 'Marketing' | 'Other';

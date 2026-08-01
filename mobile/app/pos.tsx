@@ -12,6 +12,7 @@ import { formatMoney } from '@/src/catalog/catalogItemType';
 import { semanticColors, spacing, typography } from '@/constants/theme';
 import { downloadAndShareDocument } from '@/src/documents/downloadAndShare';
 import { useIsOnline } from '@/src/offline/networkStatus';
+import { useToast } from '@/src/ui/ToastContext';
 
 const PAYMENT_METHODS: readonly PosPaymentMethod[] = ['Cash', 'EcoCash', 'Bank', 'Other'];
 
@@ -124,6 +125,7 @@ export default function PosScreen() {
   const router = useRouter();
   const inputStyle = useInputStyle();
   const isOnline = useIsOnline();
+  const { show: showToast } = useToast();
 
   const [saleType, setSaleType] = useState<SaleType>('sale');
   const [vatRate, setVatRate] = useState(0);
@@ -314,13 +316,29 @@ export default function PosScreen() {
       setCustomerName('');
       setCustomerPhone('');
       setAmountTendered('');
+      showToast(saleType === 'quotation' ? 'Quotation created.' : 'Sale completed.', 'success');
       apiClient.getCatalog().then(setItems).catch(() => {});
     } catch (err) {
-      setSaveError((err as Error).message);
+      const message = (err as Error).message;
+      setSaveError(message);
+      showToast(message, 'error');
     } finally {
       setSaving(false);
     }
-  }, [cartLines, mixedCurrency, paymentMethod, selectedCustomer, customerName, customerPhone, saleType, showCashTender, tenderedValue, grandTotal, currency]);
+  }, [
+    cartLines,
+    mixedCurrency,
+    paymentMethod,
+    selectedCustomer,
+    customerName,
+    customerPhone,
+    saleType,
+    showCashTender,
+    tenderedValue,
+    grandTotal,
+    currency,
+    showToast,
+  ]);
 
   const downloadReceipt = useCallback(async () => {
     if (!result) return;

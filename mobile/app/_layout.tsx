@@ -9,6 +9,8 @@ import AuthScreen from '@/src/auth/AuthScreen';
 import { AuthProvider, useAuth } from '@/src/auth/AuthContext';
 import { loadSession, type Session } from '@/src/auth/sessionStorage';
 import { setAuthToken } from '@/src/api/client';
+import { ConfirmProvider } from '@/src/ui/ConfirmContext';
+import { ToastProvider } from '@/src/ui/ToastContext';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -61,7 +63,11 @@ export default function RootLayout() {
 
   return (
     <AuthProvider initialSession={initialSession}>
-      <RootLayoutNav />
+      <ToastProvider>
+        <ConfirmProvider>
+          <RootLayoutNav />
+        </ConfirmProvider>
+      </ToastProvider>
     </AuthProvider>
   );
 }
