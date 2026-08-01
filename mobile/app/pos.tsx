@@ -345,7 +345,7 @@ export default function PosScreen() {
     setReceiptError(null);
     setDownloadingReceipt(true);
     try {
-      await downloadAndShareDocument(`/api/orders/${result.orderId}/receipt`, `receipt-${result.orderId.slice(0, 8)}.pdf`);
+      await downloadAndShareDocument(`/api/orders/${result.orderId}/receipt`, `receipt-${result.orderId.slice(0, 4)}.pdf`);
     } catch (err) {
       setReceiptError((err as Error).message);
     } finally {

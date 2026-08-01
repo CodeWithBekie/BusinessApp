@@ -72,7 +72,7 @@ function describeDetails(
   if (actionType === 'payment_proof_submitted') {
     try {
       const details = JSON.parse(detailsJson) as PaymentProofSubmittedDetails;
-      return { title: `Payment proof submitted for order #${details.OrderId.slice(0, 8)}`, parsed: null, paymentProof: details };
+      return { title: `Payment proof submitted for order #${details.OrderId.slice(0, 4)}`, parsed: null, paymentProof: details };
     } catch {
       // fall through to raw JSON below
     }

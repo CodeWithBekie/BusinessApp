@@ -216,7 +216,7 @@ export default function MyOrderDetailScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: order ? `Order #${order.orderId.slice(0, 8)}` : 'Order' }} />
+      <Stack.Screen options={{ title: order ? `Order #${order.orderId.slice(0, 4)}` : 'Order' }} />
       {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
       {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
       {!error && order === null && <ActivityIndicator style={styles.loading} />}

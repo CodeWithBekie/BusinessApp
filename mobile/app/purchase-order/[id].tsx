@@ -122,7 +122,7 @@ export default function PurchaseOrderDetailScreen() {
     setActionError(null);
     setDownloadingDocument(true);
     try {
-      await downloadAndShareDocument(`/api/purchase-orders/${po.id}/document`, `purchase-order-${po.id.slice(0, 8)}.pdf`);
+      await downloadAndShareDocument(`/api/purchase-orders/${po.id}/document`, `purchase-order-${po.id.slice(0, 4)}.pdf`);
     } catch (err) {
       setActionError((err as Error).message);
     } finally {
@@ -132,7 +132,7 @@ export default function PurchaseOrderDetailScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: po ? `PO #${po.id.slice(0, 8)}` : 'Purchase order' }} />
+      <Stack.Screen options={{ title: po ? `PO #${po.id.slice(0, 4)}` : 'Purchase order' }} />
       {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
       {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
       {!error && po === null && <ActivityIndicator style={styles.loading} />}
@@ -215,7 +215,7 @@ export default function PurchaseOrderDetailScreen() {
             onPress={() =>
               router.push({
                 pathname: '/(tabs)/assistant',
-                params: { attachUri: `business://purchase-orders/${po.id}`, attachLabel: `PO #${po.id.slice(0, 8)}` },
+                params: { attachUri: `business://purchase-orders/${po.id}`, attachLabel: `PO #${po.id.slice(0, 4)}` },
               })
             }
           />

@@ -13,6 +13,10 @@ public record AssistantChatRequest(IReadOnlyList<AssistantChatMessage> Messages,
 
 public record AssistantResourceSummary(string Uri, string? Name, string? Title);
 
+// Backs the "Attach" picker's live search box — candidate id values for a partially-typed resource
+// template argument (e.g. orderId), from the Mcp server's "completions" capability.
+public record AssistantCompletionResponse(IReadOnlyList<string> Values);
+
 // A resolved MCP prompt — Title is the chip's display label, Message is the actual text sent when
 // tapped (see AssistantEndpoints.cs's GET /api/assistant/prompts remarks for why these can differ).
 public record AssistantPromptResponse(string Name, string Title, string Message);

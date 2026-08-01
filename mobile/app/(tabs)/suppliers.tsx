@@ -115,7 +115,7 @@ function PurchaseOrderCard({ po, onPress }: { po: PurchaseOrderSummary; onPress:
     {
       label: 'Download document',
       icon: 'square.and.arrow.down',
-      onPress: () => downloadAndShareDocument(`/api/purchase-orders/${po.id}/document`, `purchase-order-${po.id.slice(0, 8)}.pdf`),
+      onPress: () => downloadAndShareDocument(`/api/purchase-orders/${po.id}/document`, `purchase-order-${po.id.slice(0, 4)}.pdf`),
     },
     {
       label: 'Ask Assistant about this',
@@ -123,7 +123,7 @@ function PurchaseOrderCard({ po, onPress }: { po: PurchaseOrderSummary; onPress:
       onPress: () =>
         router.push({
           pathname: '/(tabs)/assistant',
-          params: { attachUri: `business://purchase-orders/${po.id}`, attachLabel: `PO #${po.id.slice(0, 8)}` },
+          params: { attachUri: `business://purchase-orders/${po.id}`, attachLabel: `PO #${po.id.slice(0, 4)}` },
         }),
     },
   ];

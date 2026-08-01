@@ -99,6 +99,23 @@ public static class AssistantEndpoints
             return Results.Ok(results);
         }).RequireAuthorization("BusinessOnly");
 
+        // Backs the "Attach" picker's live search box — a thin passthrough to the Mcp server's
+        // "completions" capability (BusinessCompletionHandler), since the mobile app can't speak the
+        // MCP JSON-RPC/session protocol directly and only ever talks REST to this Api project.
+        app.MapGet("/api/assistant/complete", async (
+            string uri, string argument, string? value, IOptions<McpServerOptions> mcpServerOptions, HttpRequest httpRequest, CancellationToken cancellationToken) =>
+        {
+            var transport = new HttpClientTransport(new HttpClientTransportOptions
+            {
+                Endpoint = new Uri(mcpServerOptions.Value.BaseUrl),
+                AdditionalHeaders = new Dictionary<string, string> { ["Authorization"] = httpRequest.Headers.Authorization.ToString() }
+            });
+
+            await using var mcpClient = await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
+            var result = await mcpClient.CompleteAsync(new ResourceTemplateReference { Uri = uri }, argument, value ?? string.Empty, cancellationToken: cancellationToken);
+            return Results.Ok(new AssistantCompletionResponse([.. result.Completion.Values]));
+        }).RequireAuthorization("BusinessOnly");
+
         // Lets the mobile "Attach" picker enumerate resources/templates before the user sends a
         // message — resources aren't part of the model's automatic tool-calling loop, so the host
         // (this endpoint's caller) decides what to attach, matching how a real MCP host works.

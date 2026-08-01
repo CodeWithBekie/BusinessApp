@@ -138,7 +138,7 @@ export default function OrderDetailScreen() {
     setActionError(null);
     setDownloadingReceipt(true);
     try {
-      await downloadAndShareDocument(`/api/orders/${order.id}/receipt`, `receipt-${order.id.slice(0, 8)}.pdf`);
+      await downloadAndShareDocument(`/api/orders/${order.id}/receipt`, `receipt-${order.id.slice(0, 4)}.pdf`);
     } catch (err) {
       setActionError((err as Error).message);
     } finally {
@@ -292,7 +292,7 @@ export default function OrderDetailScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: order ? `Order #${order.id.slice(0, 8)}` : 'Order' }} />
+      <Stack.Screen options={{ title: order ? `Order #${order.id.slice(0, 4)}` : 'Order' }} />
       {error && <Text style={styles.error}>Could not reach the API: {error}</Text>}
       {isFromCache && <Text style={styles.cacheNote}>Showing saved data</Text>}
       {!error && order === null && <ActivityIndicator style={styles.loading} />}
@@ -532,7 +532,7 @@ export default function OrderDetailScreen() {
             variant="secondary"
             style={styles.secondaryButtonSpacing}
             onPress={() =>
-              router.push({ pathname: '/(tabs)/assistant', params: { attachUri: `business://orders/${order.id}`, attachLabel: `Order #${order.id.slice(0, 8)}` } })
+              router.push({ pathname: '/(tabs)/assistant', params: { attachUri: `business://orders/${order.id}`, attachLabel: `Order #${order.id.slice(0, 4)}` } })
             }
           />
 

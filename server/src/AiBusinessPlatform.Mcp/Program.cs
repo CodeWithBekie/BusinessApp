@@ -8,6 +8,7 @@ using AiBusinessPlatform.Infrastructure.Ledger;
 using AiBusinessPlatform.Infrastructure.Payments;
 using AiBusinessPlatform.Infrastructure.Tools;
 using AiBusinessPlatform.Infrastructure.WhatsApp;
+using AiBusinessPlatform.Mcp.Completions;
 using AiBusinessPlatform.Mcp.DevTools;
 using AiBusinessPlatform.Mcp.Prompts;
 using AiBusinessPlatform.Mcp.Resources;
@@ -126,7 +127,8 @@ builder.Services
     .WithTools<DeliveryMcpTools>()
     .WithResources<BusinessResources>()
     .WithPrompts<OwnerSuggestionPrompts>()
-    .WithPrompts<CustomerSuggestionPrompts>();
+    .WithPrompts<CustomerSuggestionPrompts>()
+    .WithCompleteHandler(BusinessCompletionHandler.HandleAsync);
 
 var app = builder.Build();
 

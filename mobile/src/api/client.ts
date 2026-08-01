@@ -108,6 +108,10 @@ export interface ElicitationSchema {
   required?: string[];
 }
 
+export interface AssistantCompletionResponse {
+  values: string[];
+}
+
 interface AssistantStreamHandlers {
   onToken: (text: string) => void;
   onDone: (citations: string[], toolsUsed: string[]) => void;
@@ -249,6 +253,10 @@ export async function streamCustomerAssistantChat(
 
 export const apiClient = {
   getAssistantResources: () => request<AssistantResourceSummary[]>('/api/assistant/resources'),
+  getAssistantCompletions: (uri: string, argument: string, value: string) =>
+    request<AssistantCompletionResponse>(
+      `/api/assistant/complete?uri=${encodeURIComponent(uri)}&argument=${encodeURIComponent(argument)}&value=${encodeURIComponent(value)}`
+    ),
   getAssistantPrompts: () => request<AssistantPrompt[]>('/api/assistant/prompts'),
   getCustomerAssistantPrompts: () => request<AssistantPrompt[]>('/api/customer-assistant/prompts'),
 
